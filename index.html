@@ -171,6 +171,18 @@
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
       </svg>
     );
+    // !! ថ្មី !!: Icon សម្រាប់សញ្ញា Banned
+    const IconNoSymbol = () => (
+      <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+      </svg>
+    );
+    // !! ថ្មី !!: Icon សម្រាប់សញ្ញា Alert
+    const IconAlert = () => (
+      <svg className="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+      </svg>
+    );
 
 
     // --- Component គោល ---
@@ -193,10 +205,11 @@
       
       const [now, setNow] = useState(new Date());
       
-      // !! ថ្មី !!: State សម្រាប់គ្រប់គ្រង Search Focus
       const [isSearchFocused, setIsSearchFocused] = useState(false);
-      // !! ថ្មី !!: State សម្រាប់ Custom Dropdown
       const [searchResults, setSearchResults] = useState([]);
+      
+      // !! ថ្មី !!: State សម្រាប់ Modal លុប
+      const [studentToDelete, setStudentToDelete] = useState(null); // { student, record }
 
       // Effect សម្រាប់ Timer (10 វិនាទី)
       useEffect(() => {
@@ -376,8 +389,8 @@
           
           setSearchTerm('');
           setSelectedStudentId('');
-          setSearchResults([]); // !! ថ្មី !!: Clear custom list
-          setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
+          setSearchResults([]); 
+          setIsSearchFocused(false); 
         } catch (error) {
           console.error('Check-out Error (RTDB - dbWrite):', error);
           if (error.code === 'PERMISSION_DENIED') {
@@ -404,8 +417,8 @@
           
           setSearchTerm(''); 
           setSelectedStudentId(''); 
-          setSearchResults([]); // !! ថ្មី !!: Clear custom list
-          setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
+          setSearchResults([]); 
+          setIsSearchFocused(false); 
         } catch (error) {
           console.error('Check-in Error (RTDB - dbWrite):', error);
            if (error.code === 'PERMISSION_DENIED') {
@@ -414,23 +427,32 @@
         }
       };
       
-      const handleDelete = async (e, studentId) => {
+      // !! កែសម្រួល !!: មិនលុបភ្លាមៗ គឺបើក Modal វិញ
+      const handleOpenDeleteModal = (e, student) => {
         e.stopPropagation(); 
-        
-        console.log("handleDelete called for studentId:", studentId);
-        if (!dbWrite || !attendance[studentId]) {
-          console.error("Delete Error: dbWrite or attendance record not found.");
+        const record = attendance[student.id];
+        if (record) {
+          setStudentToDelete({ student, record });
+        }
+      };
+      
+      // !! ថ្មី !!: មុខងារលុបពិតប្រាកដ
+      const handleConfirmDelete = async () => {
+        if (!dbWrite || !studentToDelete) {
+          console.error("Delete Error: dbWrite or studentToDelete is not set.");
           return;
         }
         
-        const docId = attendance[studentId].id;
+        const { record } = studentToDelete;
+        const docId = record.id;
         const docRef = ref(dbWrite, `attendance/${docId}`);
         
         try {
           console.log(`Attempting to delete from brakelist DB at /attendance/${docId}`);
           await remove(docRef); 
           console.log("Delete successful!");
-          if (modalStudent && modalStudent.id === studentId) {
+          setStudentToDelete(null); // បិទ Modal
+          if (modalStudent && modalStudent.id === studentToDelete.student.id) {
             setModalStudent(null);
           }
         } catch (error) {
@@ -438,39 +460,41 @@
           if (error.code === 'PERMISSION_DENIED') {
             setAuthError("!!! ERROR: 'brakelist-5f07f' permission denied. សូមពិនិត្យ Security Rules របស់ 'brakelist-5f07f' ឲ្យអនុញ្ញាតលុប (write) path '/attendance'។");
           }
+          setStudentToDelete(null); // បិទ Modal
         }
       };
 
       
-      // !! កែសម្រួល !!: ជួសជុល Error `student.idNumber.includes is not a function`
+      // !! កែសម្រួល !!: Smart Search មិនប្រកាន់ដកឃ្លា
       const handleSearchChange = (e) => {
         const value = e.target.value;
         setSearchTerm(value);
-        setSelectedStudentId(""); // Clear selection ពេលកំពុងវាយ
+        setSelectedStudentId(""); 
 
-        if (value.trim() === "") {
-          setSearchResults([]); // គ្មានអ្វីត្រូវបង្ហាញ
+        // បំប្លែង searchTerm ទៅជា string (ក្នុងករណីវាជាលេខ)
+        const normalizedSearch = String(value).replace(/\s+/g, '').toLowerCase();
+
+        if (normalizedSearch === "") {
+          setSearchResults([]); 
         } else {
-          // ត្រងយកនិស្សិត
           const matches = students.filter(student => 
-            (student.name && student.name.toLowerCase().includes(value.toLowerCase())) ||
-            (student.idNumber && String(student.idNumber).includes(value)) // !! ជួសជុល !!: ប្តូរ idNumber ទៅជា String
-          ).slice(0, 10); // បង្ហាញតែ 10 នាក់ដំបូង
+            (student.name && student.name.replace(/\s+/g, '').toLowerCase().includes(normalizedSearch)) ||
+            (student.idNumber && String(student.idNumber).replace(/\s+/g, '').includes(normalizedSearch))
+          ).slice(0, 10); 
           setSearchResults(matches);
         }
       };
       
       // !! ថ្មី !!: មុខងារពេលចុចលើឈ្មោះក្នុង Custom List
       const handleSelectStudentFromList = (student) => {
-        setSearchTerm(student.name || student.idNumber); // បំពេញ Input
-        setSelectedStudentId(student.id); // ជ្រើសរើស
-        setSearchResults([]); // បិទ List
-        setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
+        setSearchTerm(student.name || String(student.idNumber)); 
+        setSelectedStudentId(student.id); 
+        setSearchResults([]); 
+        setIsSearchFocused(false); 
       };
 
       // --- ផ្នែកបង្ហាញ (Render) ---
 
-      // !! កែសម្រួល !!: បន្ថែម prop `passesInUse`
       const StudentCard = ({ student, pageKey, elapsedMins, isOvertime, passesInUse }) => {
         const record = attendance[student.id]; 
 
@@ -479,8 +503,9 @@
         let canCheckIn = false; 
         let canCheckOut = true;
         
-        // !! ថ្មី !!: ពិនិត្យកាត បើអស់ គឺ disable ប៊ូតុង
-        if (passesInUse >= TOTAL_PASSES) {
+        // !! កែសម្រួល !!: Logic សម្រាប់កាតអស់
+        let passesAvailable = TOTAL_PASSES - passesInUse;
+        if (passesAvailable <= 0 && !record) { // បើកាតអស់ ហើយមិនទាន់មាន record
           canCheckOut = false; 
           statusText = 'កាតអស់! (40/40)';
           statusClass = 'bg-red-600 text-white';
@@ -512,11 +537,6 @@
           }
         }
         
-        // !! ថ្មី !!: បើកាតអស់ ហើយសិស្សនេះមិនទាន់សម្រាក -> disable ប៊ូតុង
-        if (passesInUse >= TOTAL_PASSES && !record) {
-            canCheckOut = false;
-        }
-        
         const photoUrl =
           student.photoUrl ||
           `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
@@ -526,9 +546,10 @@
             key={`${pageKey}-${student.id}`} 
             className="bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-6 relative mt-16 max-w-md mx-auto"
           >
+            {/* !! កែសម្រួល !!: ប៊ូតុងលុប ឥឡូវបើក Modal */}
             {record && record.checkOutTime && !record.checkInTime && (
               <button
-                onClick={(e) => handleDelete(e, student.id)}
+                onClick={(e) => handleOpenDeleteModal(e, student)}
                 className="absolute top-4 right-4 text-red-300 bg-red-900/50 p-2 rounded-full transition-all hover:bg-red-500 hover:text-white"
                 title="លុបទិន្នន័យនេះ"
               >
@@ -568,7 +589,7 @@
                 {canCheckOut && (
                   <button
                     onClick={() => handleCheckOut(student.id)}
-                    disabled={!canCheckOut} // នឹង disable ពេលកាតអស់
+                    disabled={!canCheckOut} 
                     className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold transition-all transform hover:scale-105 shadow-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
                   >
                     <IconCheckOut />
@@ -586,6 +607,14 @@
                     ចូលវិញ
                   </button>
                 )}
+              </div>
+            )}
+            
+            {/* !! ថ្មី !!: បង្ហាញប៊ូតុង Banned ពេលកាតអស់ */}
+            {!canCheckOut && statusText.startsWith('កាតអស់') && (
+              <div className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold bg-red-600/50 opacity-80 cursor-not-allowed">
+                <IconNoSymbol />
+                កាតចេញសម្រាកអស់
               </div>
             )}
           </div>
@@ -651,7 +680,7 @@
         );
       };
       
-      const OnBreakStudentListCard = ({ student, elapsedMins, isOvertime, onCheckIn, onDelete }) => {
+      const OnBreakStudentListCard = ({ student, elapsedMins, isOvertime, onCheckIn, onDeleteClick }) => {
         
         const cardColor = isOvertime 
           ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
@@ -694,8 +723,9 @@
                 <IconCheckIn />
               </button>
               
+              {/* !! កែសម្រួល !!: ហៅ onDeleteClick ពេលចុច */}
               <button
-                onClick={(e) => onDelete(e)}
+                onClick={(e) => onDeleteClick(e)}
                 className="p-3 rounded-full text-red-300 bg-white/10 transition-colors hover:bg-red-500 hover:text-white"
                 title="លុបទិន្នន័យនេះ"
               >
@@ -740,6 +770,48 @@
           );
       };
       
+      // !! ថ្មី !!: Modal សម្រាប់បញ្ជាក់ការលុប
+      const DeleteConfirmationModal = ({ studentToDelete, onCancel, onConfirm }) => {
+        if (!studentToDelete) return null;
+        
+        const { student } = studentToDelete;
+        
+        return (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+            onClick={onCancel} 
+          >
+            <div
+              className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center"
+              onClick={(e) => e.stopPropagation()} 
+            >
+              <IconAlert />
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                លុបទិន្នន័យ?
+              </h3>
+              <p className="text-gray-600 mb-6">
+                តើអ្នកប្រាកដទេថាចង់លុបទិន្នន័យសម្រាករបស់ <br/>
+                <strong className="text-gray-800">{student.name}</strong>?
+              </p>
+              <div className="flex justify-center space-x-4">
+                <button
+                  onClick={onCancel}
+                  className="px-6 py-3 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  onClick={onConfirm}
+                  className="px-6 py-3 rounded-full text-white bg-red-500 hover:bg-red-600 font-bold"
+                >
+                  លុប
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+      
 
       const LoadingSpinner = () => (
         <div className="flex justify-center items-center mt-10">
@@ -748,8 +820,6 @@
       );
       
       // --- ត្រង (Filter) និង រៀបចំ (Sort) និស្សិត ---
-      
-      // !! កែ !!: បានលុបការប្រកាស `studentsOnBreak` ស្ទួននៅទីនេះ
       
       const sortedStudentsOnBreak = studentsOnBreak
         .map(student => {
@@ -779,25 +849,25 @@
           {/* <style> បានផ្លាស់ទីទៅ <head> របស់ HTML */}
 
           <div className="min-h-screen bg-gradient-to-br from-blue-900 to-indigo-700 font-kantumruy p-4">
-            <div className="container mx-auto max-w-lg">
-              {/* --- 1. HEADER (រួម) --- */}
-              <h1 
-                className="text-4xl font-bold text-center mb-2 text-white"
-              >
-                កត់ត្រាម៉ោងសម្រាក
-              </h1>
+            <div className="container mx-auto max-w-lg relative">
               
-              {/* !! កែសម្រួល !!: គ្រប់គ្រងកម្ពស់ Date/Placeholder ជាមួយ Animation */}
-              <div className="transition-all duration-300 ease-in-out" style={{ height: isSearchFocused ? '0px' : '36px', marginBottom: '24px', opacity: isSearchFocused ? 0 : 1 }}>
-                <p className="text-xl text-center text-blue-200">
+              <div 
+                className={`transition-all duration-300 ease-in-out ${isSearchFocused ? '-translate-y-24' : 'translate-y-0'}`}
+              >
+                <h1 
+                  className="text-4xl font-bold text-center mb-2 text-white"
+                >
+                  កត់ត្រាម៉ោងសម្រាក
+                </h1>
+                
+                <p className="text-xl text-center text-blue-200 mb-6">
                   {displayDate}
                 </p>
               </div>
 
 
               {/* --- 2. TABS --- */}
-              {/* !! កែសម្រួល !!: បន្ថែម Animation រំកិលឡើងលើ ពេល Search Focus */}
-              <div className={`w-full max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-full p-1 flex space-x-1 mb-6 transition-all duration-300 ease-in-out ${isSearchFocused ? '-mt-12' : ''}`}>
+              <div className={`w-full max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-full p-1 flex space-x-1 mb-6 transition-all duration-300 ease-in-out ${isSearchFocused ? '-translate-y-24' : 'translate-y-0'}`}>
                 
                 {/* Tab 1: ស្វែងរក */}
                 <button
@@ -889,39 +959,44 @@
                   key="search-page"
                   className="relative" // ត្រូវការសម្រាប់ Custom List
                 >
-                  {/* !! កែសម្រួល !!: បន្ថែម Animation រំកិលឡើងលើ ពេល Search Focus */}
-                  <div className={`w-full max-w-md mx-auto transition-all duration-300 ease-in-out ${isSearchFocused ? '-mt-6' : 'mb-8'}`}>
+                  <div className={`w-full max-w-md mx-auto transition-all duration-300 ease-in-out ${isSearchFocused ? '-translate-y-24' : 'mb-8'}`}>
                     {students.length > 0 ? (
-                      <div>
-                        {/* <label> បានលុប */}
+                      <div className="relative">
                         <input
                           type="text"
                           id="student-search"
                           value={searchTerm}
                           onChange={handleSearchChange}
-                          onFocus={() => setIsSearchFocused(true)}
+                          onFocus={() => {
+                            setIsSearchFocused(true);
+                            setAuthError(null); // Clear error ពេលចាប់ផ្តើមវាយ
+                          }}
                           onBlur={() => {
-                            // ត្រូវ Delay បន្តិច មុនពេល Blur (បិទ List)
-                            // ដើម្បីឲ្យ onClick លើ List ដំណើរការ
                             setTimeout(() => {
-                              setIsSearchFocused(false);
-                              setSearchResults([]); // បិទ List ពេល Blur
+                              // !! កែសម្រួល !!: ត្រូវតែ Blur ពេលចុចក្រៅ
+                              if (!document.activeElement.classList.contains('search-result-button')) {
+                                setIsSearchFocused(false); 
+                                setSearchResults([]); 
+                              }
                             }, 200); 
                           }}
-                          placeholder="ស្វែងរកអត្តលេខ/ឈ្មោះ" // ប្តូរ Placeholder
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.target.blur(); 
+                              setIsSearchFocused(false);
+                            }
+                          }}
+                          placeholder="ស្វែងរកអត្តលេខ/ឈ្មោះ" 
                           className="block w-full px-6 py-4 bg-white/20 border border-white/30 rounded-full text-white text-lg placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white shadow-inner"
                         />
-                        {/* <datalist> បានលុប */}
                         
-                        {/* !! ថ្មី !!: Custom Dropdown List */}
                         {isSearchFocused && searchResults.length > 0 && (
-                          <div className="absolute z-10 w-full max-w-md mt-2 bg-white/90 backdrop-blur-lg rounded-2xl shadow-lg max-h-60 overflow-y-auto">
+                          <div className="absolute z-10 w-full max-w-md mt-2 bg-white/90 backdrop-blur-lg rounded-2xl shadow-lg max-h-80 overflow-y-auto">
                             {searchResults.map(student => (
                               <button
                                 key={student.id}
-                                // ប្រើ onMouseDown ជំនួស onClick ដើម្បីឲ្យវាដំណើរការមុន onBlur របស់ Input
+                                className="search-result-button flex items-center w-full p-3 space-x-3 text-left text-gray-800 hover:bg-blue-100 first:rounded-t-2xl last:rounded-b-2xl"
                                 onMouseDown={() => handleSelectStudentFromList(student)}
-                                className="flex items-center w-full p-3 space-x-3 text-left text-gray-800 hover:bg-blue-100"
                               >
                                 <img
                                   src={student.photoUrl || `https://placehold.co/40x40/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`}
@@ -957,10 +1032,10 @@
                       pageKey="search"
                       elapsedMins={0} 
                       isOvertime={false}
-                      passesInUse={studentsOnBreak.length} // !! ថ្មី !!: បញ្ជូនចំនួនកាត
+                      passesInUse={studentsOnBreak.length} 
                     />
                   )}
-                  {!selectedStudent && searchTerm !== "" && searchResults.length === 0 && (
+                  {!selectedStudent && searchTerm !== "" && searchResults.length === 0 && isSearchFocused && (
                     <p className="text-center text-white/70 text-lg mt-10">
                       រកមិនឃើញនិស្សិត...
                     </p>
@@ -982,7 +1057,7 @@
                         elapsedMins={elapsedMins} 
                         isOvertime={isOvertime}
                         onCheckIn={() => handleCheckIn(student.id)} 
-                        onDelete={(e) => handleDelete(e, student.id)} 
+                        onDeleteClick={(e) => handleOpenDeleteModal(e, student)} 
                       />
                     ))
                   ) : (
@@ -1039,9 +1114,9 @@
               )}
               
               {/* --- FOOTER (រួម) --- */}
-              {!loading && userId && (
+              {!loading && (
                  <p className="text-center text-xs text-blue-300 opacity-70 mt-8">
-                   UserID (brakelist): {userId}
+                   អភិវឌ្ឍន៍កម្មវិធី : IT SUPPORT
                  </p>
               )}
             </div>
@@ -1065,7 +1140,7 @@
                     isOvertime={
                       calculateDuration(attendance[modalStudent.id]?.checkOutTime, now.toISOString()) > OVERTIME_LIMIT_MINUTES
                     }
-                    passesInUse={studentsOnBreak.length} // បញ្ជូនចំនួនកាតទៅ Modal
+                    passesInUse={studentsOnBreak.length} 
                   />
                   
                   {/* ប៊ូតុងបិទ */}
@@ -1078,6 +1153,13 @@
                 </div>
               </div>
             )}
+            
+            {/* !! ថ្មី !!: Modal បញ្ជាក់ការលុប */}
+            <DeleteConfirmationModal 
+              studentToDelete={studentToDelete}
+              onCancel={() => setStudentToDelete(null)}
+              onConfirm={handleConfirmDelete}
+            />
             
           </div>
         </React.Fragment>
