@@ -218,7 +218,7 @@
     // !! ថ្មី !!: ផ្លាស់ទី Components ទាំងអស់ចេញពី App
     // =================================================================
     
-    const StudentCard = ({ student, pageKey, passesInUse, attendance, now, handleCheckOut, handleCheckIn, handleOpenPasswordModal, handleConfirmDelete_Single }) => {
+    const StudentCard = ({ student, pageKey, passesInUse, attendance, now, handleCheckOut, handleCheckIn, onDeleteClick }) => {
       
       const studentBreaks = attendance[student.id] || [];
       const activeBreak = studentBreaks.find(r => r.checkOutTime && !r.checkInTime);
@@ -288,7 +288,7 @@
         >
           {activeBreak && (
             <button
-              onClick={(e) => handleOpenPasswordModal("លុប Record ដែលកំពុងសម្រាកនេះ?", () => handleConfirmDelete_Single(activeBreak.id))}
+              onClick={(e) => onDeleteClick(e, student, activeBreak)}
               className="absolute top-4 right-4 text-red-300 bg-red-900/50 p-2 rounded-full transition-all hover:bg-red-500 hover:text-white"
               title="លុបទិន្នន័យនេះ"
             >
@@ -710,6 +710,48 @@
       </div>
     );
     
+    // !! ថ្មី !!: បន្ថែម Component នេះ
+    const DeleteConfirmationModal = ({ recordToDelete, onCancel, onConfirm }) => {
+        if (!recordToDelete) return null;
+        
+        const { student } = recordToDelete;
+        
+        return (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+            onClick={onCancel} 
+          >
+            <div
+              className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center"
+              onClick={(e) => e.stopPropagation()} 
+            >
+              <IconAlert />
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                លុបទិន្នន័យ?
+              </h3>
+              <p className="text-gray-600 mb-6">
+                តើអ្នកប្រាកដទេថាចង់លុបទិន្នន័យសម្រាករបស់ <br/>
+                <strong className="text-gray-800">{student.name}</strong>?
+              </p>
+              <div className="flex justify-center space-x-4">
+                <button
+                  onClick={onCancel}
+                  className="px-6 py-3 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  onClick={onConfirm}
+                  className="px-6 py-3 rounded-full text-white bg-red-500 hover:bg-red-600 font-bold"
+                >
+                  លុប
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+    
     // =================================================================
     // Component គោល
     // =================================================================
@@ -744,6 +786,9 @@
       const [bulkDeleteDate, setBulkDeleteDate] = useState(getTodayLocalDateString());
       const [bulkDeleteMonth, setBulkDeleteMonth] = useState(getTodayLocalMonthString());
       const [isBulkLoading, setIsBulkLoading] = useState(false);
+      
+      // !! ថ្មី !!: State សម្រាប់ Modal លុប (សាមញ្ញ)
+      const [recordToDelete, setRecordToDelete] = useState(null); // { student, record }
 
       // --- មុខងារ TTS ---
       const speak = (text) => {
@@ -1029,6 +1074,12 @@
           onConfirm: onConfirmCallback,
           error: null
         });
+      };
+      
+      // !! ថ្មី !!: មុខងារលុប (សាមញ្ញ)
+      const handleOpenDeleteModal_Simple = (e, student, record) => {
+        e.stopPropagation();
+        setRecordToDelete({ student, record });
       };
       
       const handlePasswordSubmit = (password) => {
@@ -1416,8 +1467,7 @@
                       now={now}
                       handleCheckOut={handleCheckOut}
                       handleCheckIn={handleCheckIn}
-                      handleOpenPasswordModal={handleOpenPasswordModal}
-                      handleConfirmDelete_Single={handleConfirmDelete_Single}
+                      onDeleteClick={handleOpenDeleteModal_Simple} // !! កែសម្រួល !!
                     />
                   )}
                   {!selectedStudent && searchTerm !== "" && searchResults.length === 0 && isSearchFocused && (
@@ -1443,10 +1493,7 @@
                         elapsedMins={elapsedMins} 
                         isOvertime={isOvertime}
                         onCheckIn={() => handleCheckIn(student.id)} 
-                        onDeleteClick={(e) => handleOpenPasswordModal(
-                          `លុប Record របស់ (${student.name})?`,
-                          () => handleConfirmDelete_Single(record.id)
-                        )} 
+                        onDeleteClick={(e) => handleOpenDeleteModal_Simple(e, student, record)} // !! កែសម្រួល !!
                       />
                     ))
                   ) : (
@@ -1483,10 +1530,10 @@
                         key={record.id} 
                         student={student}
                         record={record}
-                        onClick={() => !isSelectionMode && null} // !! កែសម្រួល !!: ដក Pop-up ចេញ
+                        onClick={() => !isSelectionMode && null} 
                         isSelected={selectedRecords.includes(record.id)}
                         onSelect={() => handleRecordSelect(record.id)}
-                        // !! ថ្មី !!: បន្ថែម onDeleteClick
+                        // !! កែសម្រួល !!: ប្រើ Password Modal (ត្រឹមត្រូវ)
                         onDeleteClick={(e) => handleOpenPasswordModal(
                           `លុប Record របស់ (${student.name})?`,
                           () => handleConfirmDelete_Single(record.id)
@@ -1546,8 +1593,7 @@
                     now={now}
                     handleCheckOut={handleCheckOut}
                     handleCheckIn={handleCheckIn}
-                    handleOpenPasswordModal={handleOpenPasswordModal}
-                    handleConfirmDelete_Single={handleConfirmDelete_Single}
+                    onDeleteClick={handleOpenDeleteModal_Simple} // !! កែសម្រួល !!
                   />
                   
                   {/* ប៊ូតុងបិទ */}
@@ -1561,7 +1607,15 @@
               </div>
             )}
             
-            {/* !! កែសម្រួល !!: ដក Modal ចាស់ចេញ */}
+            {/* !! ថ្មី !!: Modal បញ្ជាក់ការលុប (សាមញ្ញ) */}
+            <DeleteConfirmationModal 
+              recordToDelete={recordToDelete}
+              onCancel={() => setRecordToDelete(null)}
+              onConfirm={() => {
+                handleConfirmDelete_Single(recordToDelete.record.id);
+                setRecordToDelete(null);
+              }}
+            />
             
             {/* !! ថ្មី !!: Modal សម្រាប់ Password */}
             <PasswordConfirmationModal 
