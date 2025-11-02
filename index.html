@@ -442,7 +442,7 @@
       };
 
       
-      // !! ថ្មី !!: កែសម្រួល Search Logic សម្រាប់ Custom List
+      // !! កែសម្រួល !!: ជួសជុល Error `student.idNumber.includes is not a function`
       const handleSearchChange = (e) => {
         const value = e.target.value;
         setSearchTerm(value);
@@ -454,7 +454,7 @@
           // ត្រងយកនិស្សិត
           const matches = students.filter(student => 
             (student.name && student.name.toLowerCase().includes(value.toLowerCase())) ||
-            (student.idNumber && student.idNumber.includes(value))
+            (student.idNumber && String(student.idNumber).includes(value)) // !! ជួសជុល !!: ប្តូរ idNumber ទៅជា String
           ).slice(0, 10); // បង្ហាញតែ 10 នាក់ដំបូង
           setSearchResults(matches);
         }
