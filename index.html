@@ -13,11 +13,11 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
-  <!-- 3. Load Firebase (ត្រូវតែ Import មុន App) -->
+  <!-- 3. Load Firebase (!! ថ្មី !!: បន្ថែម 'get') -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-app.js";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-auth.js";
-    import { getDatabase, ref, onValue, set, push, update, query, orderByChild, equalTo, remove } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-database.js";
+    import { getDatabase, ref, onValue, set, push, update, query, orderByChild, equalTo, remove, get } from "https://www.gstatic.com/firebasejs/9.15.0/firebase-database.js";
     
     // ធ្វើឲ្យវា Global ងាយស្រួលហៅប្រើក្នុង <script type="text/babel">
     window.firebase = {
@@ -34,7 +34,8 @@
       query,
       orderByChild,
       equalTo,
-      remove
+      remove,
+      get // !! ថ្មី !!: សម្រាប់ Bulk Delete
     };
   </script>
   
@@ -69,11 +70,13 @@
       query: rtdbQuery, // ប្តូរឈ្មោះ 'query' ទៅជា 'rtdbQuery' 
       orderByChild,
       equalTo,
-      remove
+      remove,
+      get // !! ថ្មី !!
     } = window.firebase;
     
     const { useState, useEffect } = React;
     
+    const USER_PASSWORD = '4545ak0'; // !! ថ្មី !!: Password
     const TOTAL_PASSES = 40;
     const OVERTIME_LIMIT_MINUTES = 15;
 
@@ -111,6 +114,18 @@
       month: 'long',
       year: 'numeric',
     });
+    
+    const getTodayLocalDateString = () => {
+      const date = new Date();
+      date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+      return date.toISOString().split('T')[0];
+    };
+    
+    const getTodayLocalMonthString = () => {
+      const date = new Date();
+      date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+      return date.toISOString().substring(0, 7); // 'YYYY-MM'
+    };
 
     // --- !! ថ្មី !!: មុខងារជំនួយ គណនារយៈពេល (នាទី) ---
     const calculateDuration = (startTimeIso, endTimeIso) => {
@@ -181,22 +196,529 @@
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
       </svg>
     );
-    // !! ថ្មី !!: Icon សម្រាប់ "ករណីពិសេស"
     const IconSpecial = () => (
       <svg className="w-4 h-4 ml-1.5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path>
       </svg>
     );
+    // !! ថ្មី !!: Icon សម្រាប់ Admin Menu
+    const IconDotsVertical = () => (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+      </svg>
+    );
+    // !! ថ្មី !!: Icon សម្រាប់ Password
+    const IconLock = () => (
+      <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+      </svg>
+    );
+    
+    // =================================================================
+    // !! ថ្មី !!: ផ្លាស់ទី Components ទាំងអស់ចេញពី App
+    // =================================================================
+    
+    const StudentCard = ({ student, pageKey, passesInUse, attendance, now, handleCheckOut, handleCheckIn, handleOpenPasswordModal, handleConfirmDelete_Single }) => {
+      
+      const studentBreaks = attendance[student.id] || [];
+      const activeBreak = studentBreaks.find(r => r.checkOutTime && !r.checkInTime);
+      const completedBreaks = studentBreaks.filter(r => r.checkOutTime && r.checkInTime);
+          
+      let statusText = 'មិនទាន់សម្រាក';
+      let statusClass = 'bg-gray-500 text-white'; 
+      let canCheckIn = false; 
+      let canCheckOut = true;
+      let isSpecialCase = false; 
+      
+      let passesAvailable = TOTAL_PASSES - passesInUse;
+      
+      if (activeBreak) {
+        const elapsedMins = calculateDuration(activeBreak.checkOutTime, now.toISOString());
+        const isOvertime = elapsedMins > OVERTIME_LIMIT_MINUTES;
+        statusText = `កំពុងសម្រាក (${elapsedMins} នាទី)`; 
+        statusClass = isOvertime 
+          ? 'bg-red-600 text-white animate-pulse' 
+          : 'bg-yellow-500 text-white animate-pulse';
+        canCheckIn = true; 
+        canCheckOut = false; 
+        if (activeBreak.breakType === 'special') {
+           isSpecialCase = true;
+        }
+        
+      } else if (completedBreaks.length > 0) {
+        const lastBreak = completedBreaks[completedBreaks.length - 1]; 
+        const duration = calculateDuration(lastBreak.checkOutTime, lastBreak.checkInTime);
+        const isCompletedOvertime = duration > OVERTIME_LIMIT_MINUTES;
+        const overtimeMins = isCompletedOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
+        
+        statusText = isCompletedOvertime
+          ? `សម្រាករួច (លើស ${overtimeMins} នាទី)`
+          : `សម្រាករួច (${duration} នាទី)`; 
+        statusClass = isCompletedOvertime
+          ? 'bg-red-600 text-white' 
+          : 'bg-green-600 text-white';
+        canCheckIn = false;
+        canCheckOut = true; 
+        
+        if (studentBreaks.some(r => r.breakType === 'special')) {
+          isSpecialCase = true;
+        }
 
+      } else {
+        statusText = 'មិនទាន់សម្រាក';
+        statusClass = 'bg-gray-500 text-white';
+        canCheckIn = false;
+        canCheckOut = true;
+      }
+      
+      if (passesAvailable <= 0 && canCheckOut) {
+        canCheckOut = false; 
+        statusText = 'កាតអស់! (40/40)';
+        statusClass = 'bg-red-600 text-white';
+      }
+      
+      const photoUrl =
+        student.photoUrl ||
+        `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
 
-    // --- Component គោល ---
+      return (
+        <div
+          key={`${pageKey}-${student.id}`} 
+          className="bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-6 relative mt-16 max-w-md mx-auto"
+        >
+          {activeBreak && (
+            <button
+              onClick={(e) => handleOpenPasswordModal("លុប Record ដែលកំពុងសម្រាកនេះ?", () => handleConfirmDelete_Single(activeBreak.id))}
+              className="absolute top-4 right-4 text-red-300 bg-red-900/50 p-2 rounded-full transition-all hover:bg-red-500 hover:text-white"
+              title="លុបទិន្នន័យនេះ"
+            >
+              <IconTrash />
+            </button>
+          )}
+          
+          <img
+            src={photoUrl}
+            alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
+            className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"
+            onError={(e) => {
+              e.target.src = `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
+            }}
+          />
+          
+          <div className="pt-16 text-center">
+            <p className="text-3xl font-bold text-white">
+              {student.name || 'គ្មានឈ្មោះ'}
+            </p>
+            <p className="text-lg text-blue-200">
+              អត្តលេខ: {student.idNumber || 'N/A'}
+            </p>
+            <p className="text-lg text-blue-200">
+              ថ្នាក់: {student.class || 'N/A'}
+            </p>
+          </div>
+          
+          <div className="my-6 text-center">
+             <p className={`inline-flex items-center px-5 py-2 rounded-full text-md font-semibold ${statusClass}`}>
+              {statusText}
+              {isSpecialCase && <IconSpecial />}
+            </p>
+          </div>
+
+          {(canCheckOut || canCheckIn) && (
+            <div className="flex flex-col space-y-3">
+              {canCheckOut && (
+                <button
+                  onClick={() => handleCheckOut(student.id)}
+                  disabled={!canCheckOut} 
+                  className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold transition-all transform hover:scale-105 shadow-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                >
+                  <IconCheckOut />
+                  ចេញសម្រាក
+                </button>
+              )}
+              
+              {canCheckIn && (
+                <button
+                  onClick={() => handleCheckIn(student.id)}
+                  disabled={!canCheckIn}
+                  className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-blue-800 font-bold transition-all transform hover:scale-105 shadow-lg bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
+                >
+                  <IconCheckIn />
+                  ចូលវិញ
+                </button>
+              )}
+            </div>
+          )}
+          
+          {!canCheckOut && statusText.startsWith('កាតអស់') && (
+            <div className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold bg-red-600/50 opacity-80 cursor-not-allowed">
+              <IconNoSymbol />
+              កាតចេញសម្រាកអស់
+            </div>
+          )}
+        </div>
+      );
+    };
+    
+    // !! កែសម្រួល !!: បន្ថែម 'isSelectionMode' ក្នុង props
+    const CompletedStudentListCard = ({ student, record, onClick, isSelected, onSelect, onDeleteClick, isSelectionMode }) => {
+      
+      const formatTime = (isoString) => {
+        if (!isoString) return 'N/A';
+        return new Date(isoString).toLocaleTimeString('km-KH', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      };
+
+      const duration = calculateDuration(record?.checkOutTime, record?.checkInTime);
+      
+      const isOvertime = duration > OVERTIME_LIMIT_MINUTES;
+      const overtimeMins = isOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
+      const cardColor = isOvertime 
+        ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
+        : 'bg-white/10 backdrop-blur-lg'; 
+      const durationColor = isOvertime ? 'text-red-300' : 'text-green-300';
+
+      const photoUrl =
+        student.photoUrl ||
+        `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
+
+      return (
+        <div
+          className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-4 transition-all ${cardColor} ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? 'ring-2 ring-blue-400' : ''}`}
+          onClick={() => isSelectionMode ? onSelect() : (onClick ? onClick() : null)}
+        >
+          {isSelectionMode && (
+            <input 
+              type="checkbox"
+              checked={isSelected}
+              onChange={onSelect}
+              className="form-checkbox h-6 w-6 text-blue-600 bg-gray-700 border-gray-500 rounded focus:ring-blue-500"
+              onClick={(e) => e.stopPropagation()} 
+            />
+          )}
+          <img
+            src={photoUrl}
+            alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
+            className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"
+            onError={(e) => {
+              e.target.src = `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
+            }}
+          />
+          <div className="flex-1 text-left">
+            <p className="text-xl font-bold text-white">
+              {student.name || 'គ្មានឈ្មោះ'}
+            </p>
+            <p className="text-sm text-blue-200">
+              ចេញ: {formatTime(record?.checkOutTime)} | ចូល: {formatTime(record?.checkInTime)}
+            </p>
+            {isOvertime && (
+              <p className="text-sm font-semibold text-red-300">
+                (លើស {overtimeMins} នាទី)
+              </p>
+            )}
+            {record.breakType === 'special' && (
+               <p className="text-sm font-semibold text-purple-300">
+                (ករណីពិសេស)
+              </p>
+            )}
+          </div>
+          
+          <div className="text-center px-2">
+            <p className={`text-2xl font-bold ${durationColor}`}>{duration}</p>
+            <p className="text-xs text-blue-200">នាទី</p>
+          </div>
+          
+          {!isSelectionMode && (
+            <button
+              onClick={(e) => onDeleteClick(e)}
+              className="p-3 rounded-full text-red-300 bg-white/10 transition-colors hover:bg-red-500 hover:text-white"
+              title="លុបទិន្នន័យនេះ"
+            >
+              <IconTrash />
+            </button>
+          )}
+        </div>
+      );
+    };
+    
+    const OnBreakStudentListCard = ({ student, record, elapsedMins, isOvertime, onCheckIn, onDeleteClick }) => {
+      
+      const cardColor = isOvertime 
+        ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
+        : 'bg-yellow-500/20 backdrop-blur-lg border border-yellow-500/30'; 
+      
+      const textColor = isOvertime ? 'text-red-300' : 'text-yellow-300';
+
+      const photoUrl =
+        student.photoUrl ||
+        `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
+
+      return (
+        <div className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-3 ${cardColor}`}>
+          <img
+            src={photoUrl}
+            alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
+            className="w-16 h-16 rounded-full object-cover border-2 border-white/50 shadow-md"
+            onError={(e) => { e.target.src = `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`; }}
+          />
+          <div className="flex-1 text-left">
+            <p className="text-xl font-bold text-white">
+              {student.name || 'គ្មានឈ្មោះ'}
+            </p>
+            <p className={`text-sm font-semibold ${textColor} inline-flex items-center`}>
+              {isOvertime ? "លើសម៉ោង!" : "កំពុងសម្រាក..."}
+              {record.breakType === 'special' && (
+                <span className="ml-2 px-2 py-0.5 text-xs text-purple-800 bg-purple-300 rounded-full">
+                  ពិសេស
+                </span>
+              )}
+            </p>
+          </div>
+          
+          <div className="text-center px-2">
+            <p className={`text-2xl font-bold ${textColor}`}>{elapsedMins}</p>
+            <p className="text-xs text-blue-200">នាទី</p>
+          </div>
+          
+          <div className="flex flex-col space-y-2">
+            <button
+              onClick={() => onCheckIn()}
+              className="p-3 rounded-full text-blue-800 bg-white transition-colors hover:bg-gray-200"
+              title="ចុចចូលវិញ"
+            >
+              <IconCheckIn />
+            </button>
+            
+            <button
+              onClick={(e) => onDeleteClick(e)}
+              className="p-3 rounded-full text-red-300 bg-white/10 transition-colors hover:bg-red-500 hover:text-white"
+              title="លុបទិន្នន័យនេះ"
+            >
+              <IconTrash />
+            </button>
+          </div>
+        </div>
+      );
+    };
+    
+    const PassesInfoPage = ({ studentsOnBreakCount, totalPasses }) => {
+        const passesInUse = studentsOnBreakCount;
+        const passesAvailable = totalPasses - passesInUse;
+        
+        return (
+          <div className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-8 mt-16 text-center">
+            <div className="mb-6">
+              <IconTicket className="w-24 h-24 text-blue-200 mx-auto" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-4">
+              ស្ថានភាពកាតចេញចូល
+            </h2>
+            
+            <div className="mb-8">
+              <p className="text-8xl font-bold text-white">{passesAvailable}</p>
+              <p className="text-2xl text-blue-200">
+                កាតនៅសល់
+              </p>
+            </div>
+            
+            <div className="flex justify-around text-white">
+              <div className="text-center">
+                <p className="text-4xl font-bold text-red-300">{passesInUse}</p>
+                <p className="text-lg text-blue-200">កំពុងប្រើ</p>
+              </div>
+              <div className="text-center">
+                <p className="text-4xl font-bold">{totalPasses}</p>
+                <p className="text-lg text-blue-200">សរុប</p>
+              </div>
+            </div>
+          </div>
+        );
+    };
+    
+    // --- !! ថ្មី !!: Modal សម្រាប់ Password ---
+    const PasswordConfirmationModal = ({ prompt, onSubmit, onCancel }) => {
+      if (!prompt.isOpen) return null;
+      
+      const [password, setPassword] = useState("");
+      
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        onSubmit(password);
+      };
+      
+      return (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+          onClick={onCancel} 
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center"
+            onClick={(e) => e.stopPropagation()} 
+          >
+            <IconLock />
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">
+              ទាមទារ Password
+            </h3>
+            <p className="text-gray-600 mb-4">
+              {prompt.message}
+            </p>
+            <form onSubmit={handleSubmit}>
+              <input 
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-center text-lg"
+                placeholder="Password..."
+                autoFocus
+              />
+              {prompt.error && (
+                <p className="text-red-500 text-sm mt-2">{prompt.error}</p>
+              )}
+              <div className="flex justify-center space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="px-6 py-3 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold"
+                >
+                  បោះបង់
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-3 rounded-full text-white bg-blue-500 hover:bg-blue-600 font-bold"
+                >
+                  បញ្ជាក់
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    };
+    
+    // --- !! ថ្មី !!: Modal សម្រាប់ Admin Actions ---
+    const AdminActionModal = ({ isOpen, onClose, onSelectClick, onBulkClick, isBulkLoading, bulkDeleteDate, setBulkDeleteDate, bulkDeleteMonth, setBulkDeleteMonth }) => {
+      if (!isOpen) return null;
+      
+      return (
+        <div 
+          className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={onClose} 
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-t-2xl shadow-lg p-4"
+            onClick={(e) => e.stopPropagation()} 
+          >
+            <div className="w-16 h-1.5 bg-gray-300 rounded-full mx-auto mb-4"></div>
+            
+            <h3 className="text-xl font-bold text-gray-900 mb-4 text-center">
+              មុខងារ Admin
+            </h3>
+            
+            <div className="space-y-3">
+              <button
+                onClick={onSelectClick}
+                className="w-full px-4 py-3 text-left text-lg font-semibold text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg"
+              >
+                ជ្រើសរើស (Multi-Select)
+              </button>
+              
+              {/* មុខងារលុបតាមថ្ងៃ */}
+              <div className="p-4 bg-gray-100 rounded-lg">
+                <label className="block text-lg font-semibold text-gray-800 mb-2">លុបតាមថ្ងៃ</label>
+                <input 
+                  type="date"
+                  value={bulkDeleteDate}
+                  onChange={(e) => setBulkDeleteDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg"
+                />
+                <button
+                  onClick={() => onBulkClick('day')}
+                  className="w-full mt-2 px-4 py-3 text-lg font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg disabled:opacity-50"
+                  disabled={isBulkLoading}
+                >
+                  {isBulkLoading ? 'កំពុងលុប...' : 'លុបប្រចាំថ្ងៃ'}
+                </button>
+              </div>
+              
+              {/* មុខងារលុបតាមខែ */}
+              <div className="p-4 bg-gray-100 rounded-lg">
+                <label className="block text-lg font-semibold text-gray-800 mb-2">លុបតាមខែ</label>
+                <input 
+                  type="month"
+                  value={bulkDeleteMonth}
+                  onChange={(e) => setBulkDeleteMonth(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-lg"
+                />
+                <button
+                  onClick={() => onBulkClick('month')}
+                  className="w-full mt-2 px-4 py-3 text-lg font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+                  disabled={isBulkLoading}
+                >
+                  {isBulkLoading ? 'កំពុងលុប...' : 'លុបប្រចាំខែ'}
+                </button>
+              </div>
+              
+            </div>
+          </div>
+        </div>
+      );
+    };
+    
+    // --- !! ថ្មី !!: Header សម្រាប់ Page "បានចូល" ---
+    const CompletedListHeader = ({ onAdminClick, onMultiDeleteClick, onCancelMultiSelect, selectionCount, isSelectionMode }) => {
+      return (
+        <div className="w-full max-w-md mx-auto mb-4 flex justify-between items-center">
+          {!isSelectionMode ? (
+            <>
+              <h2 className="text-2xl font-bold text-white">
+                ប្រវត្តិ (ថ្ងៃនេះ)
+              </h2>
+              <button
+                onClick={onAdminClick}
+                className="p-3 rounded-full text-white bg-white/10 transition-colors hover:bg-white/30"
+                title="មុខងារ Admin"
+              >
+                <IconDotsVertical />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={onCancelMultiSelect}
+                className="px-4 py-2 text-white font-semibold bg-gray-600/50 rounded-full hover:bg-gray-500/50"
+              >
+                បោះបង់
+              </button>
+              <button
+                onClick={onMultiDeleteClick}
+                disabled={selectionCount === 0}
+                className="px-4 py-2 text-white font-bold bg-red-500 rounded-full hover:bg-red-600 disabled:opacity-50"
+              >
+                លុប ({selectionCount})
+              </button>
+            </>
+          )}
+        </div>
+      );
+    };
+
+    const LoadingSpinner = () => (
+      <div className="flex justify-center items-center mt-10">
+        <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+    
+    // =================================================================
+    // Component គោល
+    // =================================================================
     function App() {
       const [dbRead, setDbRead] = useState(null); 
       const [dbWrite, setDbWrite] = useState(null); 
       
       const [userId, setUserId] = useState(null); 
       const [students, setStudents] = useState([]); 
-      // !! កែសម្រួល !!: State ឥឡូវជា { studentId: [breaks...] }
       const [attendance, setAttendance] = useState({}); 
       
       const [loading, setLoading] = useState(true);
@@ -214,13 +736,37 @@
       const [isSearchFocused, setIsSearchFocused] = useState(false);
       const [searchResults, setSearchResults] = useState([]);
       
-      const [studentToDelete, setStudentToDelete] = useState(null); // { student, record }
+      const [passwordPrompt, setPasswordPrompt] = useState({ isOpen: false });
+      const [isSelectionMode, setIsSelectionMode] = useState(false);
+      const [selectedRecords, setSelectedRecords] = useState([]); // Array of record IDs
+      const [showAdminModal, setShowAdminModal] = useState(false);
+      const [bulkDeleteMode, setBulkDeleteMode] = useState(null); // 'day' or 'month'
+      const [bulkDeleteDate, setBulkDeleteDate] = useState(getTodayLocalDateString());
+      const [bulkDeleteMonth, setBulkDeleteMonth] = useState(getTodayLocalMonthString());
+      const [isBulkLoading, setIsBulkLoading] = useState(false);
+
+      // --- មុខងារ TTS ---
+      const speak = (text) => {
+        try {
+          if (!window.speechSynthesis) {
+            console.warn("Browser does not support Speech Synthesis.");
+            return;
+          }
+          window.speechSynthesis.cancel();
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'km-KH'; 
+          utterance.rate = 0.9; 
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.error("Speech Synthesis Error:", e);
+        }
+      };
 
       // Effect សម្រាប់ Timer (1 វិនាទី)
       useEffect(() => {
         const timer = setInterval(() => {
           setNow(new Date());
-        }, 1000); // 1000 ms = 1 វិនាទី
+        }, 1000); 
         return () => clearInterval(timer);
       }, []); 
 
@@ -320,7 +866,6 @@
             },
           );
 
-          // !! កែសម្រួល !!: Logic សម្រាប់ទាញយក Array នៃវត្តមាន
           const attendanceRef = ref(dbWrite, 'attendance');
           const qAttendance = rtdbQuery(
             attendanceRef,
@@ -336,12 +881,11 @@
                 Object.keys(attData).forEach((key) => {
                   const data = attData[key];
                   if (!attMap[data.studentId]) {
-                    attMap[data.studentId] = []; // ចាប់ផ្តើម Array
+                    attMap[data.studentId] = []; 
                   }
                   attMap[data.studentId].push({ id: key, ...data });
                 });
               }
-              // Sort វត្តមាននីមួយៗតាមម៉ោង
               for (const studentId in attMap) {
                 attMap[studentId].sort((a, b) => new Date(a.checkOutTime) - new Date(b.checkOutTime));
               }
@@ -366,16 +910,20 @@
       }, [dbRead, dbWrite, todayString]); 
 
       // --- ត្រង (Filter) និស្សិត (ប្រើក្នុង Render) ---
-      // !! កែសម្រួល !!: Logic សម្រាប់ Array
       const studentsOnBreak = students.filter(student => {
         const breaks = attendance[student.id] || [];
-        return breaks.some(r => r.checkOutTime && !r.checkInTime); // រកមើលអ្នកដែលមាន record កំពុង Active
+        return breaks.some(r => r.checkOutTime && !r.checkInTime); 
       });
       
       // --- មុខងារសម្រាប់កត់ត្រា (ប្រើ dbWrite) ---
       
-      // !! កែសម្រួល !!: ដក Logic AM/PM ចេញ
       const handleCheckOut = async (studentId) => {
+        const student = students.find(s => s.id === studentId);
+        if (!student) {
+          console.error("Check-out Error: Student not found for ID:", studentId);
+          return;
+        }
+            
         if (!dbWrite) {
             console.error("Check-out Error: dbWrite is not initialized."); 
             return; 
@@ -387,14 +935,15 @@
           return; 
         }
         
+        speak(`${student.name || 'និស្សិត'} បានចេញក្រៅ`);
+
         const now = new Date();
         const studentBreaks = attendance[studentId] || [];
         const completedBreaks = studentBreaks.filter(r => r.checkInTime && r.checkOutTime);
         const breakCount = completedBreaks.length;
         
-        let breakType = "normal"; // Default
+        let breakType = "normal"; 
         
-        // !! កែសម្រួល !!: Logic ថ្មី (ដក AM/PM)
         if (breakCount === 0) {
           breakType = "normal";
           console.log("Break 1 attempt.");
@@ -402,7 +951,6 @@
           breakType = "normal";
           console.log("Break 2 attempt.");
         } else {
-          // នេះជាការសម្រាកលើកទី 3+
           breakType = "special"; // ករណីពិសេស
           console.log("Break 3+ (Special Case) attempt.");
         }
@@ -415,7 +963,7 @@
             date: todayString,
             checkInTime: null,
             checkOutTime: now.toISOString(), 
-            breakType: breakType // រក្សាទុកប្រភេទ
+            breakType: breakType 
           });
           
           setSearchTerm('');
@@ -430,15 +978,21 @@
         }
       };
       
-      // !! កែសម្រួល !!: ត្រូវ Update record ត្រឹមត្រូវ
       const handleCheckIn = async (studentId) => {
+        const student = students.find(s => s.id === studentId);
+        if (!student) {
+          console.error("Check-in Error: Student not found for ID:", studentId);
+          return;
+        }
+        
+        speak(`${student.name || 'និស្សិត'} បានចូលមកវិញ`);
+            
         if (!dbWrite) {
             console.error("Check-in Error: dbWrite is not initialized."); 
             return;
         }
         
         const studentBreaks = attendance[studentId] || [];
-        // រកមើល Record ណាដែលកំពុង Active (មិនទាន់ Check in)
         const activeBreak = studentBreaks.find(r => r.checkOutTime && !r.checkInTime);
         
         if (!activeBreak) {
@@ -447,7 +1001,7 @@
         }
 
         const now = new Date();
-        const docId = activeBreak.id; // យក ID របស់ Record ដែល Active
+        const docId = activeBreak.id; 
         const docRef = ref(dbWrite, `attendance/${docId}`);
         try {
           await update(docRef, {
@@ -466,50 +1020,151 @@
         }
       };
       
-      // !! កែសម្រួល !!: ត្រូវបើក Modal ជាមួយ Record ត្រឹមត្រូវ
-      const handleOpenDeleteModal = (e, student, record) => {
-        e.stopPropagation(); 
-        if (record) {
-          setStudentToDelete({ student, record });
+      // --- !! ថ្មី !!: មុខងារលុប និង Password ---
+      
+      const handleOpenPasswordModal = (message, onConfirmCallback) => {
+        setPasswordPrompt({
+          isOpen: true,
+          message: message,
+          onConfirm: onConfirmCallback,
+          error: null
+        });
+      };
+      
+      const handlePasswordSubmit = (password) => {
+        if (password === USER_PASSWORD) {
+          passwordPrompt.onConfirm(); // ដំណើរការ
+          setPasswordPrompt({ isOpen: false }); // បិទ Modal
         } else {
-          // Fallback (សម្រាប់ Card ធំ)
-          const studentBreaks = attendance[student.id] || [];
-          const activeBreak = studentBreaks.find(r => r.checkOutTime && !r.checkInTime);
-          if (activeBreak) {
-            setStudentToDelete({ student, record: activeBreak });
-          }
+          setPasswordPrompt(prev => ({ ...prev, error: "Password មិនត្រឹមត្រូវ!" }));
         }
       };
       
-      // !! កែសម្រួល !!: Logic លុប មិនផ្លាស់ប្តូរ (ព្រោះ studentToDelete មាន record.id)
-      const handleConfirmDelete = async () => {
-        if (!dbWrite || !studentToDelete) {
-          console.error("Delete Error: dbWrite or studentToDelete is not set.");
-          return;
-        }
-        
-        const { record } = studentToDelete;
-        const docId = record.id;
-        const docRef = ref(dbWrite, `attendance/${docId}`);
-        
+      // -- 1. លុបតែមួយ (Single Delete) --
+      const handleConfirmDelete_Single = async (recordId) => {
+        if (!dbWrite) return;
+        const docRef = ref(dbWrite, `attendance/${recordId}`);
         try {
-          await remove(docRef); 
+          await remove(docRef);
           console.log("Delete successful!");
-          setStudentToDelete(null); // បិទ Modal
-          if (modalStudent && modalStudent.id === studentToDelete.student.id) {
-            setModalStudent(null);
-          }
         } catch (error) {
           console.error('Delete Error (RTDB - dbWrite):', error);
-          if (error.code === 'PERMISSION_DENIED') {
-            setAuthError("!!! ERROR: 'brakelist-5f07f' permission denied. សូមពិនិត្យ Security Rules របស់ 'brakelist-5f07f' ឲ្យអនុញ្ញាតលុប (write) path '/attendance'។");
-          }
-          setStudentToDelete(null); // បិទ Modal
+          setAuthError(`Delete Error: ${error.message}`);
         }
       };
-
       
-      // Smart Search (មិនផ្លាស់ប្តូរ)
+      // -- 2. លុបច្រើន (Multi-Select) --
+      const handleToggleSelectionMode = () => {
+        setIsSelectionMode(prev => !prev);
+        setSelectedRecords([]);
+        setShowAdminModal(false);
+      };
+      
+      const handleRecordSelect = (recordId) => {
+        setSelectedRecords(prev => 
+          prev.includes(recordId) 
+            ? prev.filter(id => id !== recordId) 
+            : [...prev, recordId]
+        );
+      };
+      
+      const handleOpenDeleteSelected = () => {
+        if (selectedRecords.length === 0) return;
+        handleOpenPasswordModal(
+          `តើអ្នកប្រាកដទេថាចង់លុប ${selectedRecords.length} record ដែលបានជ្រើសរើស?`,
+          () => handleConfirmDelete_Multi()
+        );
+      };
+
+      const handleConfirmDelete_Multi = async () => {
+        if (!dbWrite || selectedRecords.length === 0) return;
+        
+        const updates = {};
+        selectedRecords.forEach(recordId => {
+          updates[`/attendance/${recordId}`] = null; // Set to null to delete
+        });
+        
+        try {
+          await update(ref(dbWrite), updates);
+          console.log("Multi-delete successful!");
+          handleToggleSelectionMode(); // ចេញពី Selection Mode
+        } catch (error) {
+          console.error('Multi-Delete Error (RTDB - dbWrite):', error);
+          setAuthError(`Multi-Delete Error: ${error.message}`);
+        }
+      };
+      
+      // -- 3. លុបតាមថ្ងៃ/ខែ (Bulk Delete) --
+      const handleOpenBulkDelete = (mode) => {
+        setBulkDeleteMode(mode);
+        setShowAdminModal(false);
+        // បើក Password Modal *បន្ទាប់ពី* បិទ Admin Modal
+        setTimeout(() => {
+          handleOpenPasswordModal(
+            mode === 'day' 
+              ? `លុបទិន្នន័យតាមថ្ងៃ (${bulkDeleteDate})?` 
+              : `លុបទិន្នន័យតាមខែ (${bulkDeleteMonth})?`,
+            () => handleConfirmBulkDelete(mode)
+          );
+        }, 100);
+      };
+      
+      const handleConfirmBulkDelete = async (mode) => {
+        if (!dbWrite) return;
+        setIsBulkLoading(true);
+        setAuthError(null);
+        
+        try {
+          const attendanceRef = ref(dbWrite, 'attendance');
+          const allDataSnapshot = await get(attendanceRef);
+          
+          if (!allDataSnapshot.exists()) {
+            console.log("No data to delete.");
+            setIsBulkLoading(false);
+            return;
+          }
+          
+          const allData = allDataSnapshot.val();
+          const updates = {};
+          let count = 0;
+
+          const filterDate = mode === 'day' ? bulkDeleteDate : bulkDeleteMonth;
+          
+          Object.keys(allData).forEach(recordId => {
+            const record = allData[recordId];
+            if (record && record.date) {
+              const recordDate = record.date; // 'YYYY-MM-DD'
+              
+              if (mode === 'day' && recordDate === filterDate) {
+                updates[`/attendance/${recordId}`] = null;
+                count++;
+              } else if (mode === 'month' && recordDate.startsWith(filterDate)) {
+                updates[`/attendance/${recordId}`] = null;
+                count++;
+              }
+            }
+          });
+          
+          if (count > 0) {
+            await update(ref(dbWrite), updates);
+            console.log(`Successfully bulk-deleted ${count} records.`);
+            alert(`លុប ${count} record បានជោគជ័យ!`);
+          } else {
+            console.log("No matching records found to delete.");
+            alert("រកមិនឃើញទិន្នន័យសម្រាប់លុបទេ។");
+          }
+          
+        } catch (error) {
+          console.error('Bulk Delete Error:', error);
+          setAuthError(`Bulk Delete Error: ${error.message}`);
+        } finally {
+          setIsBulkLoading(false);
+          setBulkDeleteMode(null);
+        }
+      };
+      
+      // ------------------------------------
+      
       const handleSearchChange = (e) => {
         const value = e.target.value;
         setSearchTerm(value);
@@ -528,7 +1183,6 @@
         }
       };
       
-      // មុខងារពេលចុចលើឈ្មោះក្នុង Custom List (មិនផ្លាស់ប្តូរ)
       const handleSelectStudentFromList = (student) => {
         setSearchTerm(student.name || String(student.idNumber)); 
         setSelectedStudentId(student.id); 
@@ -536,382 +1190,20 @@
         setIsSearchFocused(false); 
       };
 
-      // --- ផ្នែកបង្ហាញ (Render) ---
-
-      // !! កែសម្រួល !!: Logic ក្នុង Card ធំ
-      const StudentCard = ({ student, pageKey, passesInUse }) => {
-        
-        const studentBreaks = attendance[student.id] || [];
-        const activeBreak = studentBreaks.find(r => r.checkOutTime && !r.checkInTime);
-        const completedBreaks = studentBreaks.filter(r => r.checkOutTime && r.checkInTime);
-            
-        let statusText = 'មិនទាន់សម្រាក';
-        let statusClass = 'bg-gray-500 text-white'; 
-        let canCheckIn = false; 
-        let canCheckOut = true;
-        let isSpecialCase = false; // !! ថ្មី !!
-        
-        let passesAvailable = TOTAL_PASSES - passesInUse;
-        
-        if (activeBreak) {
-          // --- កំពុងសម្រាក ---
-          // !! កែសម្រួល !!: ប្រើ 'now' (ពី State) ដើម្បីគណនា Realtime
-          const elapsedMins = calculateDuration(activeBreak.checkOutTime, now.toISOString());
-          const isOvertime = elapsedMins > OVERTIME_LIMIT_MINUTES;
-          statusText = `កំពុងសម្រាក (${elapsedMins} នាទី)`; 
-          statusClass = isOvertime 
-            ? 'bg-red-600 text-white animate-pulse' 
-            : 'bg-yellow-500 text-white animate-pulse';
-          canCheckIn = true; 
-          canCheckOut = false; 
-          if (activeBreak.breakType === 'special') {
-             isSpecialCase = true; // សម្គាល់ករណីពិសេស
-          }
-          
-        } else if (completedBreaks.length > 0) {
-          // --- សម្រាករួច ---
-          const lastBreak = completedBreaks[completedBreaks.length - 1]; // យក Record ចុងក្រោយ
-          const duration = calculateDuration(lastBreak.checkOutTime, lastBreak.checkInTime);
-          const isCompletedOvertime = duration > OVERTIME_LIMIT_MINUTES;
-          const overtimeMins = isCompletedOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
-          
-          statusText = isCompletedOvertime
-            ? `សម្រាករួច (លើស ${overtimeMins} នាទី)`
-            : `សម្រាករួច (${duration} នាទី)`; 
-          statusClass = isCompletedOvertime
-            ? 'bg-red-600 text-white' 
-            : 'bg-green-600 text-white';
-          canCheckIn = false;
-          canCheckOut = true; // អាចចេញម្តងទៀត
-          
-          // បើការសម្រាកណាមួយជា "special" ត្រូវបង្ហាញ
-          if (studentBreaks.some(r => r.breakType === 'special')) {
-            isSpecialCase = true;
-          }
-
-        } else {
-          // --- មិនទាន់សម្រាក ---
-          statusText = 'មិនទាន់សម្រាក';
-          statusClass = 'bg-gray-500 text-white';
-          canCheckIn = false;
-          canCheckOut = true;
-        }
-        
-        if (passesAvailable <= 0 && canCheckOut) {
-          canCheckOut = false; 
-          statusText = 'កាតអស់! (40/40)';
-          statusClass = 'bg-red-600 text-white';
-        }
-        
-        const photoUrl =
-          student.photoUrl ||
-          `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
-
-        return (
-          <div
-            key={`${pageKey}-${student.id}`} 
-            className="bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-6 relative mt-16 max-w-md mx-auto"
-          >
-            {activeBreak && (
-              <button
-                onClick={(e) => handleOpenDeleteModal(e, student, activeBreak)}
-                className="absolute top-4 right-4 text-red-300 bg-red-900/50 p-2 rounded-full transition-all hover:bg-red-500 hover:text-white"
-                title="លុបទិន្នន័យនេះ"
-              >
-                <IconTrash />
-              </button>
-            )}
-            
-            <img
-              src={photoUrl}
-              alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
-              className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2"
-              onError={(e) => {
-                e.target.src = `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
-              }}
-            />
-            
-            <div className="pt-16 text-center">
-              <p className="text-3xl font-bold text-white">
-                {student.name || 'គ្មានឈ្មោះ'}
-              </p>
-              <p className="text-lg text-blue-200">
-                អត្តលេខ: {student.idNumber || 'N/A'}
-              </p>
-              <p className="text-lg text-blue-200">
-                ថ្នាក់: {student.class || 'N/A'}
-              </p>
-            </div>
-            
-            <div className="my-6 text-center">
-               <p className={`inline-flex items-center px-5 py-2 rounded-full text-md font-semibold ${statusClass}`}>
-                {statusText}
-                {/* !! ថ្មី !!: បង្ហាញ Icon ករណីពិសេស */}
-                {isSpecialCase && <IconSpecial />}
-              </p>
-            </div>
-
-            {(canCheckOut || canCheckIn) && (
-              <div className="flex flex-col space-y-3">
-                {canCheckOut && (
-                  <button
-                    onClick={() => handleCheckOut(student.id)}
-                    disabled={!canCheckOut} 
-                    className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold transition-all transform hover:scale-105 shadow-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
-                  >
-                    <IconCheckOut />
-                    ចេញសម្រាក
-                  </button>
-                )}
-                
-                {canCheckIn && (
-                  <button
-                    onClick={() => handleCheckIn(student.id)}
-                    disabled={!canCheckIn}
-                    className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-blue-800 font-bold transition-all transform hover:scale-105 shadow-lg bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
-                  >
-                    <IconCheckIn />
-                    ចូលវិញ
-                  </button>
-                )}
-              </div>
-            )}
-            
-            {!canCheckOut && statusText.startsWith('កាតអស់') && (
-              <div className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold bg-red-600/50 opacity-80 cursor-not-allowed">
-                <IconNoSymbol />
-                កាតចេញសម្រាកអស់
-              </div>
-            )}
-          </div>
-        );
-      };
-      
-      // !! កែសម្រួល !!: ទទួលយក `record` ផ្ទាល់
-      const CompletedStudentListCard = ({ student, record, onClick }) => {
-        
-        const formatTime = (isoString) => {
-          if (!isoString) return 'N/A';
-          return new Date(isoString).toLocaleTimeString('km-KH', {
-            hour: '2-digit',
-            minute: '2-digit',
-          });
-        };
-
-        const duration = calculateDuration(record?.checkOutTime, record?.checkInTime);
-        
-        const isOvertime = duration > OVERTIME_LIMIT_MINUTES;
-        const overtimeMins = isOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
-        const cardColor = isOvertime 
-          ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
-          : 'bg-white/10 backdrop-blur-lg'; 
-        const durationColor = isOvertime ? 'text-red-300' : 'text-green-300';
-
-        const photoUrl =
-          student.photoUrl ||
-          `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
-
-        return (
-          <button
-            onClick={onClick}
-            className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-4 transition-all hover:bg-white/20 ${cardColor}`}
-          >
-            <img
-              src={photoUrl}
-              alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
-              className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"
-              onError={(e) => {
-                e.target.src = `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
-              }}
-            />
-            <div className="flex-1 text-left">
-              <p className="text-xl font-bold text-white">
-                {student.name || 'គ្មានឈ្មោះ'}
-              </p>
-              <p className="text-sm text-blue-200">
-                ចេញ: {formatTime(record?.checkOutTime)} | ចូល: {formatTime(record?.checkInTime)}
-              </p>
-              {isOvertime && (
-                <p className="text-sm font-semibold text-red-300">
-                  (លើស {overtimeMins} នាទី)
-                </p>
-              )}
-              {/* !! ថ្មី !!: បង្ហាញករណីពិសេស */}
-              {record.breakType === 'special' && (
-                 <p className="text-sm font-semibold text-purple-300">
-                  (ករណីពិសេស)
-                </p>
-              )}
-            </div>
-            
-            <div className="text-center px-2">
-              <p className={`text-2xl font-bold ${durationColor}`}>{duration}</p>
-              <p className="text-xs text-blue-200">នាទី</p>
-            </div>
-          </button>
-        );
-      };
-      
-      // !! កែសម្រួល !!: ទទួលយក `record` ផ្ទាល់
-      const OnBreakStudentListCard = ({ student, record, elapsedMins, isOvertime, onCheckIn, onDeleteClick }) => {
-        
-        const cardColor = isOvertime 
-          ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
-          : 'bg-yellow-500/20 backdrop-blur-lg border border-yellow-500/30'; 
-        
-        const textColor = isOvertime ? 'text-red-300' : 'text-yellow-300';
-
-        const photoUrl =
-          student.photoUrl ||
-          `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
-
-        return (
-          <div className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-3 ${cardColor}`}>
-            <img
-              src={photoUrl}
-              alt={`រូបថតរបស់ ${student.name || 'និស្សិត'}`}
-              className="w-16 h-16 rounded-full object-cover border-2 border-white/50 shadow-md"
-              onError={(e) => { e.target.src = `https://placehold.co/64x64/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`; }}
-            />
-            <div className="flex-1 text-left">
-              <p className="text-xl font-bold text-white">
-                {student.name || 'គ្មានឈ្មោះ'}
-              </p>
-              <p className={`text-sm font-semibold ${textColor} inline-flex items-center`}>
-                {isOvertime ? "លើសម៉ោង!" : "កំពុងសម្រាក..."}
-                {/* !! ថ្មី !!: បង្ហាញករណីពិសេស */}
-                {record.breakType === 'special' && (
-                  <span className="ml-2 px-2 py-0.5 text-xs text-purple-800 bg-purple-300 rounded-full">
-                    ពិសេស
-                  </span>
-                )}
-              </p>
-            </div>
-            
-            <div className="text-center px-2">
-              <p className={`text-2xl font-bold ${textColor}`}>{elapsedMins}</p>
-              <p className="text-xs text-blue-200">នាទី</p>
-            </div>
-            
-            <div className="flex flex-col space-y-2">
-              <button
-                onClick={() => onCheckIn()}
-                className="p-3 rounded-full text-blue-800 bg-white transition-colors hover:bg-gray-200"
-                title="ចុចចូលវិញ"
-              >
-                <IconCheckIn />
-              </button>
-              
-              <button
-                onClick={(e) => onDeleteClick(e)}
-                className="p-3 rounded-full text-red-300 bg-white/10 transition-colors hover:bg-red-500 hover:text-white"
-                title="លុបទិន្នន័យនេះ"
-              >
-                <IconTrash />
-              </button>
-            </div>
-          </div>
-        );
-      };
-      
-      const PassesInfoPage = ({ studentsOnBreakCount, totalPasses }) => {
-          const passesInUse = studentsOnBreakCount;
-          const passesAvailable = totalPasses - passesInUse;
-          
-          return (
-            <div className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-8 mt-16 text-center">
-              <div className="mb-6">
-                <IconTicket className="w-24 h-24 text-blue-200 mx-auto" />
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-4">
-                ស្ថានភាពកាតចេញចូល
-              </h2>
-              
-              <div className="mb-8">
-                <p className="text-8xl font-bold text-white">{passesAvailable}</p>
-                <p className="text-2xl text-blue-200">
-                  កាតនៅសល់
-                </p>
-              </div>
-              
-              <div className="flex justify-around text-white">
-                <div className="text-center">
-                  <p className="text-4xl font-bold text-red-300">{passesInUse}</p>
-                  <p className="text-lg text-blue-200">កំពុងប្រើ</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-4xl font-bold">{totalPasses}</p>
-                  <p className="text-lg text-blue-200">សរុប</p>
-                </div>
-              </div>
-            </div>
-          );
-      };
-      
-      const DeleteConfirmationModal = ({ studentToDelete, onCancel, onConfirm }) => {
-        if (!studentToDelete) return null;
-        
-        const { student } = studentToDelete;
-        
-        return (
-          <div 
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
-            onClick={onCancel} 
-          >
-            <div
-              className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-6 text-center"
-              onClick={(e) => e.stopPropagation()} 
-            >
-              <IconAlert />
-              <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                លុបទិន្នន័យ?
-              </h3>
-              <p className="text-gray-600 mb-6">
-                តើអ្នកប្រាកដទេថាចង់លុបទិន្នន័យសម្រាករបស់ <br/>
-                <strong className="text-gray-800">{student.name}</strong>?
-              </p>
-              <div className="flex justify-center space-x-4">
-                <button
-                  onClick={onCancel}
-                  className="px-6 py-3 rounded-full text-gray-700 bg-gray-200 hover:bg-gray-300 font-bold"
-                >
-                  បោះបង់
-                </button>
-                <button
-                  onClick={onConfirm}
-                  className="px-6 py-3 rounded-full text-white bg-red-500 hover:bg-red-600 font-bold"
-                >
-                  លុប
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      };
-      
-
-      const LoadingSpinner = () => (
-        <div className="flex justify-center items-center mt-10">
-          <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      );
-      
       // --- ត្រង (Filter) និង រៀបចំ (Sort) និស្សិត ---
       
-      // !! កែសម្រួល !!: Logic សម្រាប់ Array
       const sortedStudentsOnBreak = studentsOnBreak
         .map(student => {
           const breaks = attendance[student.id] || [];
           const activeBreak = breaks.find(r => r.checkOutTime && !r.checkInTime);
           
-          if (!activeBreak) return null; // មិនគួរកើតឡើង
+          if (!activeBreak) return null; 
 
-          // !! កែសម្រួល !!: ប្រើ 'now' (ពី State) ដើម្បីគណនា Realtime
           const elapsedMins = calculateDuration(activeBreak.checkOutTime, now.toISOString()); 
           const isOvertime = elapsedMins > OVERTIME_LIMIT_MINUTES; 
           return { student, record: activeBreak, elapsedMins, isOvertime };
         })
-        .filter(Boolean) // ដក nulls ចេញ
+        .filter(Boolean) 
         .sort((a, b) => {
           if (a.isOvertime !== b.isOvertime) {
             return a.isOvertime ? -1 : 1;
@@ -919,7 +1211,6 @@
           return b.elapsedMins - a.elapsedMins;
         });
 
-      // !! កែសម្រួល !!: បង្កើត List នៃ "Breaks" មិនមែន "Students"
       const allCompletedBreaks = [];
       students.forEach(student => {
         const breaks = attendance[student.id] || [];
@@ -929,7 +1220,6 @@
           }
         });
       });
-      // Sort តាមម៉ោងចូល (ថ្មីៗមុនគេ)
       allCompletedBreaks.sort((a, b) => new Date(b.record.checkInTime) - new Date(a.record.checkInTime));
       
       
@@ -943,7 +1233,6 @@
           <div className="min-h-screen bg-gradient-to-br from-blue-900 to-indigo-700 font-kantumruy p-4">
             <div className="container mx-auto max-w-lg relative">
               
-              {/* !! កែសម្រួល !!: Animation រំកិលឡើងលើ */}
               <div 
                 className={`transition-all duration-300 ease-in-out ${isSearchFocused ? '-translate-y-24' : 'translate-y-0'}`}
               >
@@ -1123,6 +1412,12 @@
                       student={selectedStudent} 
                       pageKey="search"
                       passesInUse={studentsOnBreak.length} 
+                      attendance={attendance}
+                      now={now}
+                      handleCheckOut={handleCheckOut}
+                      handleCheckIn={handleCheckIn}
+                      handleOpenPasswordModal={handleOpenPasswordModal}
+                      handleConfirmDelete_Single={handleConfirmDelete_Single}
                     />
                   )}
                   {!selectedStudent && searchTerm !== "" && searchResults.length === 0 && isSearchFocused && (
@@ -1148,7 +1443,10 @@
                         elapsedMins={elapsedMins} 
                         isOvertime={isOvertime}
                         onCheckIn={() => handleCheckIn(student.id)} 
-                        onDeleteClick={(e) => handleOpenDeleteModal(e, student, record)} 
+                        onDeleteClick={(e) => handleOpenPasswordModal(
+                          `លុប Record របស់ (${student.name})?`,
+                          () => handleConfirmDelete_Single(record.id)
+                        )} 
                       />
                     ))
                   ) : (
@@ -1164,19 +1462,36 @@
                 </div>
               )}
               
-              {/* --- PAGE 3: បានចូល --- */}
+              {/* --- PAGE 3: បានចូល (!! ថ្មី !!: បន្ថែម Header) --- */}
               {!loading && currentPage === 'completed' && (
                 <div 
                   key="completed-page"
                   className="pb-10"
                 >
+                  {/* !! ថ្មី !!: Header ថ្មីសម្រាប់ Admin Actions */}
+                  <CompletedListHeader 
+                    onAdminClick={() => setShowAdminModal(true)}
+                    onMultiDeleteClick={handleOpenDeleteSelected}
+                    onCancelMultiSelect={handleToggleSelectionMode}
+                    selectionCount={selectedRecords.length}
+                    isSelectionMode={isSelectionMode}
+                  />
+                  
                   {allCompletedBreaks.length > 0 ? (
                     allCompletedBreaks.map(({ student, record }) => (
                       <CompletedStudentListCard 
                         key={record.id} 
                         student={student}
                         record={record}
-                        onClick={() => setModalStudent(student)} 
+                        onClick={() => !isSelectionMode && null} // !! កែសម្រួល !!: ដក Pop-up ចេញ
+                        isSelected={selectedRecords.includes(record.id)}
+                        onSelect={() => handleRecordSelect(record.id)}
+                        // !! ថ្មី !!: បន្ថែម onDeleteClick
+                        onDeleteClick={(e) => handleOpenPasswordModal(
+                          `លុប Record របស់ (${student.name})?`,
+                          () => handleConfirmDelete_Single(record.id)
+                        )}
+                        isSelectionMode={isSelectionMode}
                       />
                     ))
                   ) : (
@@ -1227,6 +1542,12 @@
                     student={modalStudent} 
                     pageKey="modal"
                     passesInUse={studentsOnBreak.length} 
+                    attendance={attendance}
+                    now={now}
+                    handleCheckOut={handleCheckOut}
+                    handleCheckIn={handleCheckIn}
+                    handleOpenPasswordModal={handleOpenPasswordModal}
+                    handleConfirmDelete_Single={handleConfirmDelete_Single}
                   />
                   
                   {/* ប៊ូតុងបិទ */}
@@ -1240,11 +1561,26 @@
               </div>
             )}
             
-            {/* !! ថ្មី !!: Modal បញ្ជាក់ការលុប */}
-            <DeleteConfirmationModal 
-              studentToDelete={studentToDelete}
-              onCancel={() => setStudentToDelete(null)}
-              onConfirm={handleConfirmDelete}
+            {/* !! កែសម្រួល !!: ដក Modal ចាស់ចេញ */}
+            
+            {/* !! ថ្មី !!: Modal សម្រាប់ Password */}
+            <PasswordConfirmationModal 
+              prompt={passwordPrompt}
+              onCancel={() => setPasswordPrompt({ isOpen: false })}
+              onSubmit={handlePasswordSubmit}
+            />
+            
+            {/* !! ថ្មី !!: Modal សម្រាប់ Admin Actions */}
+            <AdminActionModal 
+              isOpen={showAdminModal}
+              onClose={() => setShowAdminModal(false)}
+              onSelectClick={handleToggleSelectionMode}
+              onBulkClick={(mode) => handleOpenBulkDelete(mode)}
+              isBulkLoading={isBulkLoading}
+              bulkDeleteDate={bulkDeleteDate}
+              setBulkDeleteDate={setBulkDeleteDate}
+              bulkDeleteMonth={bulkDeleteMonth}
+              setBulkDeleteMonth={setBulkDeleteMonth}
             />
             
           </div>
