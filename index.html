@@ -74,7 +74,6 @@
     
     const { useState, useEffect } = React;
     
-    // !! ថ្មី !!: កំណត់ចំនួនកាតសរុប
     const TOTAL_PASSES = 40;
     const OVERTIME_LIMIT_MINUTES = 15;
 
@@ -157,7 +156,6 @@
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
       </svg>
     );
-    // !! ថ្មី !!: Icon សម្រាប់ "កាត" (Passes/Ticket)
     const IconTicket = ({ className = "w-6 h-6" }) => (
       <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
@@ -194,6 +192,11 @@
       const [modalStudent, setModalStudent] = useState(null);
       
       const [now, setNow] = useState(new Date());
+      
+      // !! ថ្មី !!: State សម្រាប់គ្រប់គ្រង Search Focus
+      const [isSearchFocused, setIsSearchFocused] = useState(false);
+      // !! ថ្មី !!: State សម្រាប់ Custom Dropdown
+      const [searchResults, setSearchResults] = useState([]);
 
       // Effect សម្រាប់ Timer (10 វិនាទី)
       useEffect(() => {
@@ -330,16 +333,6 @@
             },
           );
           
-          // !! ថ្មី !!: ទាញ Total Passes ពី Firebase (ប្រសិនបើអ្នកចង់ឲ្យវា Dynamic)
-          // ខ្ញុំនឹងទុកវាជា Hardcode 40 តាមសំណើ
-          // const settingsRef = ref(dbWrite, 'settings/totalPasses');
-          // onValue(settingsRef, (snapshot) => {
-          //   const passes = snapshot.val();
-          //   if (passes) {
-          //     setTotalPasses(passes);
-          //   }
-          // });
-
           return () => {
             unsubscribeStudents();
             unsubscribeAttendance();
@@ -347,6 +340,12 @@
         }
       }, [dbRead, dbWrite, todayString]); 
 
+      // --- ត្រង (Filter) និស្សិត (ប្រើក្នុង Render) ---
+      const studentsOnBreak = students.filter(student => {
+        const record = attendance[student.id];
+        return record && record.checkOutTime && !record.checkInTime;
+      });
+      
       // --- មុខងារសម្រាប់កត់ត្រា (ប្រើ dbWrite) ---
       const handleCheckOut = async (studentId) => {
         console.log("handleCheckOut called for studentId:", studentId); 
@@ -358,9 +357,8 @@
         // !! ថ្មី !!: ពិនិត្យកាតនៅសល់
         const passesInUse = studentsOnBreak.length;
         if (passesInUse >= TOTAL_PASSES) {
-          setAuthError("!!! ERROR: កាតចេញសម្រាកអស់ហើយ! សូមរង់ចាំសិស្សផ្សេងទៀតចូលវិញសិន។");
-          // អាចបន្ថែមជា Modal ស្អាត ជំនួស setAuthError
-          return;
+          setAuthError(`!!! ERROR: កាតចេញសម្រាកអស់ហើយ! (${passesInUse}/${TOTAL_PASSES})`);
+          return; // បញ្ឈប់ការ Check-out
         }
         
         const now = new Date();
@@ -378,6 +376,8 @@
           
           setSearchTerm('');
           setSelectedStudentId('');
+          setSearchResults([]); // !! ថ្មី !!: Clear custom list
+          setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
         } catch (error) {
           console.error('Check-out Error (RTDB - dbWrite):', error);
           if (error.code === 'PERMISSION_DENIED') {
@@ -404,6 +404,8 @@
           
           setSearchTerm(''); 
           setSelectedStudentId(''); 
+          setSearchResults([]); // !! ថ្មី !!: Clear custom list
+          setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
         } catch (error) {
           console.error('Check-in Error (RTDB - dbWrite):', error);
            if (error.code === 'PERMISSION_DENIED') {
@@ -440,32 +442,49 @@
       };
 
       
+      // !! ថ្មី !!: កែសម្រួល Search Logic សម្រាប់ Custom List
       const handleSearchChange = (e) => {
         const value = e.target.value;
         setSearchTerm(value);
-        
-        const matchingStudent = students.find(
-          (student) => 
-            (student.name && student.name.toLowerCase() === value.toLowerCase()) ||
-            (student.idNumber && student.idNumber === value)
-        );
-        
-        if (matchingStudent) {
-          setSelectedStudentId(matchingStudent.id);
+        setSelectedStudentId(""); // Clear selection ពេលកំពុងវាយ
+
+        if (value.trim() === "") {
+          setSearchResults([]); // គ្មានអ្វីត្រូវបង្ហាញ
         } else {
-          setSelectedStudentId("");
+          // ត្រងយកនិស្សិត
+          const matches = students.filter(student => 
+            (student.name && student.name.toLowerCase().includes(value.toLowerCase())) ||
+            (student.idNumber && student.idNumber.includes(value))
+          ).slice(0, 10); // បង្ហាញតែ 10 នាក់ដំបូង
+          setSearchResults(matches);
         }
+      };
+      
+      // !! ថ្មី !!: មុខងារពេលចុចលើឈ្មោះក្នុង Custom List
+      const handleSelectStudentFromList = (student) => {
+        setSearchTerm(student.name || student.idNumber); // បំពេញ Input
+        setSelectedStudentId(student.id); // ជ្រើសរើស
+        setSearchResults([]); // បិទ List
+        setIsSearchFocused(false); // !! ថ្មី !!: បង្ហាញ Date វិញ
       };
 
       // --- ផ្នែកបង្ហាញ (Render) ---
 
-      const StudentCard = ({ student, pageKey, elapsedMins, isOvertime }) => {
+      // !! កែសម្រួល !!: បន្ថែម prop `passesInUse`
+      const StudentCard = ({ student, pageKey, elapsedMins, isOvertime, passesInUse }) => {
         const record = attendance[student.id]; 
 
         let statusText = 'មិនទាន់សម្រាក';
         let statusClass = 'bg-gray-500 text-white'; 
         let canCheckIn = false; 
         let canCheckOut = true;
+        
+        // !! ថ្មី !!: ពិនិត្យកាត បើអស់ គឺ disable ប៊ូតុង
+        if (passesInUse >= TOTAL_PASSES) {
+          canCheckOut = false; 
+          statusText = 'កាតអស់! (40/40)';
+          statusClass = 'bg-red-600 text-white';
+        }
 
         if (record) {
           if (record.checkOutTime && !record.checkInTime) {
@@ -477,7 +496,6 @@
             canCheckOut = false; 
           } else if (record.checkOutTime && record.checkInTime) {
             const duration = calculateDuration(record.checkOutTime, record.checkInTime);
-            // !! កែ !!: បន្ថែម Logic លើសម៉ោង សម្រាប់អ្នកបានចូល
             const isCompletedOvertime = duration > OVERTIME_LIMIT_MINUTES;
             const overtimeMins = isCompletedOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
             
@@ -486,13 +504,19 @@
               : `សម្រាករួច (${duration} នាទី)`; 
               
             statusClass = isCompletedOvertime
-              ? 'bg-red-600 text-white' // ពណ៌ក្រហម
-              : 'bg-green-600 text-white'; // ពណ៌បៃតង
+              ? 'bg-red-600 text-white' 
+              : 'bg-green-600 text-white';
               
             canCheckIn = false;
             canCheckOut = false;
           }
         }
+        
+        // !! ថ្មី !!: បើកាតអស់ ហើយសិស្សនេះមិនទាន់សម្រាក -> disable ប៊ូតុង
+        if (passesInUse >= TOTAL_PASSES && !record) {
+            canCheckOut = false;
+        }
+        
         const photoUrl =
           student.photoUrl ||
           `https://placehold.co/128x128/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`;
@@ -544,7 +568,7 @@
                 {canCheckOut && (
                   <button
                     onClick={() => handleCheckOut(student.id)}
-                    disabled={!canCheckOut}
+                    disabled={!canCheckOut} // នឹង disable ពេលកាតអស់
                     className="flex items-center justify-center w-full px-4 py-4 rounded-full text-lg text-white font-bold transition-all transform hover:scale-105 shadow-lg bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
                   >
                     <IconCheckOut />
@@ -568,7 +592,6 @@
         );
       };
       
-      // !! កែសម្រួល !!: Component សម្រាប់ List Card "បានចូល"
       const CompletedStudentListCard = ({ student, onClick }) => {
         const record = attendance[student.id];
         
@@ -582,12 +605,11 @@
 
         const duration = calculateDuration(record?.checkOutTime, record?.checkInTime);
         
-        // !! ថ្មី !!: Logic សម្រាប់ពណ៌ក្រហម
         const isOvertime = duration > OVERTIME_LIMIT_MINUTES;
         const overtimeMins = isOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
         const cardColor = isOvertime 
-          ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' // លើសម៉ោង
-          : 'bg-white/10 backdrop-blur-lg'; // ធម្មតា
+          ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' 
+          : 'bg-white/10 backdrop-blur-lg'; 
         const durationColor = isOvertime ? 'text-red-300' : 'text-green-300';
 
         const photoUrl =
@@ -597,7 +619,6 @@
         return (
           <button
             onClick={onClick}
-            // !! ថ្មី !!: បន្ថែម cardColor
             className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-4 transition-all hover:bg-white/20 ${cardColor}`}
           >
             <img
@@ -615,7 +636,6 @@
               <p className="text-sm text-blue-200">
                 ចេញ: {formatTime(record?.checkOutTime)} | ចូល: {formatTime(record?.checkInTime)}
               </p>
-              {/* !! ថ្មី !!: បង្ហាញនាទីដែលលើស */}
               {isOvertime && (
                 <p className="text-sm font-semibold text-red-300">
                   (លើស {overtimeMins} នាទី)
@@ -624,7 +644,6 @@
             </div>
             
             <div className="text-center px-2">
-              {/* !! ថ្មី !!: បន្ថែម durationColor */}
               <p className={`text-2xl font-bold ${durationColor}`}>{duration}</p>
               <p className="text-xs text-blue-200">នាទី</p>
             </div>
@@ -687,7 +706,6 @@
         );
       };
       
-      // !! ថ្មី !!: Component សម្រាប់ Page "កាតចេញចូល"
       const PassesInfoPage = ({ studentsOnBreakCount, totalPasses }) => {
           const passesInUse = studentsOnBreakCount;
           const passesAvailable = totalPasses - passesInUse;
@@ -731,10 +749,7 @@
       
       // --- ត្រង (Filter) និង រៀបចំ (Sort) និស្សិត ---
       
-      const studentsOnBreak = students.filter(student => {
-        const record = attendance[student.id];
-        return record && record.checkOutTime && !record.checkInTime;
-      });
+      // !! កែ !!: បានលុបការប្រកាស `studentsOnBreak` ស្ទួននៅទីនេះ
       
       const sortedStudentsOnBreak = studentsOnBreak
         .map(student => {
@@ -771,15 +786,18 @@
               >
                 កត់ត្រាម៉ោងសម្រាក
               </h1>
-              <p 
-                className="text-xl text-center mb-6 text-blue-200"
-              >
-                {displayDate}
-              </p>
+              
+              {/* !! កែសម្រួល !!: គ្រប់គ្រងកម្ពស់ Date/Placeholder ជាមួយ Animation */}
+              <div className="transition-all duration-300 ease-in-out" style={{ height: isSearchFocused ? '0px' : '36px', marginBottom: '24px', opacity: isSearchFocused ? 0 : 1 }}>
+                <p className="text-xl text-center text-blue-200">
+                  {displayDate}
+                </p>
+              </div>
 
-              {/* --- 2. TABS (!! កែសម្រួល !!) --- */}
-              {/* !! ថ្មី !!: ប្តូរទៅ w-1/4 សម្រាប់ 4 Tabs */}
-              <div className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-full p-1 flex space-x-1 mb-6">
+
+              {/* --- 2. TABS --- */}
+              {/* !! កែសម្រួល !!: បន្ថែម Animation រំកិលឡើងលើ ពេល Search Focus */}
+              <div className={`w-full max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-full p-1 flex space-x-1 mb-6 transition-all duration-300 ease-in-out ${isSearchFocused ? '-mt-12' : ''}`}>
                 
                 {/* Tab 1: ស្វែងរក */}
                 <button
@@ -833,7 +851,7 @@
                   </span>
                 </button>
                 
-                {/* !! ថ្មី !!: Tab 4: កាតចេញចូល */}
+                {/* Tab 4: កាតចេញចូល */}
                 <button
                   onClick={() => setCurrentPage('passes')}
                   className={`w-1/4 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
@@ -844,7 +862,6 @@
                 >
                   <span className="relative z-10 flex items-center">
                     <IconTicket />
-                    {/* បង្ហាញចំនួនកាតកំពុងប្រើ */}
                     {studentsOnBreak.length > 0 && (
                       <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
                         {studentsOnBreak.length}
@@ -859,39 +876,66 @@
               {loading && <LoadingSpinner />}
 
               {authError && (
-                <div className="mt-16 text-center bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative max-w-md mx-auto" role="alert">
-                  <strong className="font-bold">បញ្ហា Firebase!</strong>
+                <div className="mt-4 mb-4 text-center bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative max-w-md mx-auto" role="alert">
+                  <strong className="font-bold">បញ្ហា!</strong>
                   <span className="block sm:inline ml-2">{authError}</span>
+                  <button onClick={() => setAuthError(null)} className="absolute top-0 bottom-0 right-0 px-4 py-3 text-red-700">✕</button>
                 </div>
               )}
                 
-              {/* --- PAGE 1: ស្វែងរក --- */}
+              {/* --- PAGE 1: ស្វែងរក (!! កែសម្រួល !!) --- */}
               {!loading && currentPage === 'search' && (
                 <div 
                   key="search-page"
+                  className="relative" // ត្រូវការសម្រាប់ Custom List
                 >
-                  <div className="mb-8 w-full max-w-md mx-auto">
+                  {/* !! កែសម្រួល !!: បន្ថែម Animation រំកិលឡើងលើ ពេល Search Focus */}
+                  <div className={`w-full max-w-md mx-auto transition-all duration-300 ease-in-out ${isSearchFocused ? '-mt-6' : 'mb-8'}`}>
                     {students.length > 0 ? (
                       <div>
-                        <label htmlFor="student-search" className="block text-sm font-medium text-blue-100 mb-2 text-center">
-                          វាយឈ្មោះ ឬ អត្តលេខនិស្សិត:
-                        </label>
+                        {/* <label> បានលុប */}
                         <input
                           type="text"
                           id="student-search"
-                          list="student-list"
                           value={searchTerm}
                           onChange={handleSearchChange}
-                          placeholder="-- ស្វែងរកនៅទីនេះ --"
+                          onFocus={() => setIsSearchFocused(true)}
+                          onBlur={() => {
+                            // ត្រូវ Delay បន្តិច មុនពេល Blur (បិទ List)
+                            // ដើម្បីឲ្យ onClick លើ List ដំណើរការ
+                            setTimeout(() => {
+                              setIsSearchFocused(false);
+                              setSearchResults([]); // បិទ List ពេល Blur
+                            }, 200); 
+                          }}
+                          placeholder="ស្វែងរកអត្តលេខ/ឈ្មោះ" // ប្តូរ Placeholder
                           className="block w-full px-6 py-4 bg-white/20 border border-white/30 rounded-full text-white text-lg placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-white shadow-inner"
                         />
-                        <datalist id="student-list">
-                          {students.map((student) => (
-                            <option key={student.id} value={student.name}>
-                              {student.idNumber}
-                            </option>
-                          ))}
-                        </datalist>
+                        {/* <datalist> បានលុប */}
+                        
+                        {/* !! ថ្មី !!: Custom Dropdown List */}
+                        {isSearchFocused && searchResults.length > 0 && (
+                          <div className="absolute z-10 w-full max-w-md mt-2 bg-white/90 backdrop-blur-lg rounded-2xl shadow-lg max-h-60 overflow-y-auto">
+                            {searchResults.map(student => (
+                              <button
+                                key={student.id}
+                                // ប្រើ onMouseDown ជំនួស onClick ដើម្បីឲ្យវាដំណើរការមុន onBlur របស់ Input
+                                onMouseDown={() => handleSelectStudentFromList(student)}
+                                className="flex items-center w-full p-3 space-x-3 text-left text-gray-800 hover:bg-blue-100"
+                              >
+                                <img
+                                  src={student.photoUrl || `https://placehold.co/40x40/EBF4FF/76A9FA?text=${student.name ? student.name.charAt(0) : 'N'}`}
+                                  className="w-10 h-10 rounded-full object-cover"
+                                />
+                                <div>
+                                  <p className="font-bold">{student.name}</p>
+                                  <p className="text-sm text-gray-600">{student.idNumber}</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        
                       </div>
                     ) : (
                       !authError && (
@@ -912,10 +956,11 @@
                       student={selectedStudent} 
                       pageKey="search"
                       elapsedMins={0} 
-                      isOvertime={false} 
+                      isOvertime={false}
+                      passesInUse={studentsOnBreak.length} // !! ថ្មី !!: បញ្ជូនចំនួនកាត
                     />
                   )}
-                  {!selectedStudent && searchTerm !== "" && (
+                  {!selectedStudent && searchTerm !== "" && searchResults.length === 0 && (
                     <p className="text-center text-white/70 text-lg mt-10">
                       រកមិនឃើញនិស្សិត...
                     </p>
@@ -980,7 +1025,7 @@
                 </div>
               )}
               
-              {/* --- !! ថ្មី !!: PAGE 4: កាតចេញចូល --- */}
+              {/* --- PAGE 4: កាតចេញចូល --- */}
               {!loading && currentPage === 'passes' && (
                 <div 
                   key="passes-page"
@@ -1020,6 +1065,7 @@
                     isOvertime={
                       calculateDuration(attendance[modalStudent.id]?.checkOutTime, now.toISOString()) > OVERTIME_LIMIT_MINUTES
                     }
+                    passesInUse={studentsOnBreak.length} // បញ្ជូនចំនួនកាតទៅ Modal
                   />
                   
                   {/* ប៊ូតុងបិទ */}
