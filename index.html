@@ -73,6 +73,10 @@
     } = window.firebase;
     
     const { useState, useEffect } = React;
+    
+    // !! ថ្មី !!: កំណត់ចំនួនកាតសរុប
+    const TOTAL_PASSES = 40;
+    const OVERTIME_LIMIT_MINUTES = 15;
 
     // --- !! ថ្មី !!: ការកំណត់ Firebase សម្រាប់ "អាន" (Read) បញ្ជីឈ្មោះ ---
     const firebaseConfigRead = {
@@ -151,6 +155,12 @@
     const IconCheckCircle = () => (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+      </svg>
+    );
+    // !! ថ្មី !!: Icon សម្រាប់ "កាត" (Passes/Ticket)
+    const IconTicket = ({ className = "w-6 h-6" }) => (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path>
       </svg>
     );
     const IconClose = () => (
@@ -319,6 +329,16 @@
               }
             },
           );
+          
+          // !! ថ្មី !!: ទាញ Total Passes ពី Firebase (ប្រសិនបើអ្នកចង់ឲ្យវា Dynamic)
+          // ខ្ញុំនឹងទុកវាជា Hardcode 40 តាមសំណើ
+          // const settingsRef = ref(dbWrite, 'settings/totalPasses');
+          // onValue(settingsRef, (snapshot) => {
+          //   const passes = snapshot.val();
+          //   if (passes) {
+          //     setTotalPasses(passes);
+          //   }
+          // });
 
           return () => {
             unsubscribeStudents();
@@ -334,6 +354,15 @@
             console.error("Check-out Error: dbWrite is not initialized."); 
             return; 
         }
+        
+        // !! ថ្មី !!: ពិនិត្យកាតនៅសល់
+        const passesInUse = studentsOnBreak.length;
+        if (passesInUse >= TOTAL_PASSES) {
+          setAuthError("!!! ERROR: កាតចេញសម្រាកអស់ហើយ! សូមរង់ចាំសិស្សផ្សេងទៀតចូលវិញសិន។");
+          // អាចបន្ថែមជា Modal ស្អាត ជំនួស setAuthError
+          return;
+        }
+        
         const now = new Date();
         const attendanceRef = ref(dbWrite, 'attendance');
         const newRecordRef = push(attendanceRef);
@@ -448,8 +477,18 @@
             canCheckOut = false; 
           } else if (record.checkOutTime && record.checkInTime) {
             const duration = calculateDuration(record.checkOutTime, record.checkInTime);
-            statusText = `សម្រាករួច (${duration} នាទី)`; 
-            statusClass = 'bg-green-600 text-white'; 
+            // !! កែ !!: បន្ថែម Logic លើសម៉ោង សម្រាប់អ្នកបានចូល
+            const isCompletedOvertime = duration > OVERTIME_LIMIT_MINUTES;
+            const overtimeMins = isCompletedOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
+            
+            statusText = isCompletedOvertime
+              ? `សម្រាករួច (លើស ${overtimeMins} នាទី)`
+              : `សម្រាករួច (${duration} នាទី)`; 
+              
+            statusClass = isCompletedOvertime
+              ? 'bg-red-600 text-white' // ពណ៌ក្រហម
+              : 'bg-green-600 text-white'; // ពណ៌បៃតង
+              
             canCheckIn = false;
             canCheckOut = false;
           }
@@ -529,6 +568,7 @@
         );
       };
       
+      // !! កែសម្រួល !!: Component សម្រាប់ List Card "បានចូល"
       const CompletedStudentListCard = ({ student, onClick }) => {
         const record = attendance[student.id];
         
@@ -541,6 +581,14 @@
         };
 
         const duration = calculateDuration(record?.checkOutTime, record?.checkInTime);
+        
+        // !! ថ្មី !!: Logic សម្រាប់ពណ៌ក្រហម
+        const isOvertime = duration > OVERTIME_LIMIT_MINUTES;
+        const overtimeMins = isOvertime ? duration - OVERTIME_LIMIT_MINUTES : 0;
+        const cardColor = isOvertime 
+          ? 'bg-red-800/30 backdrop-blur-lg border border-red-500/30' // លើសម៉ោង
+          : 'bg-white/10 backdrop-blur-lg'; // ធម្មតា
+        const durationColor = isOvertime ? 'text-red-300' : 'text-green-300';
 
         const photoUrl =
           student.photoUrl ||
@@ -549,7 +597,8 @@
         return (
           <button
             onClick={onClick}
-            className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-lg rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-4 transition-all hover:bg-white/20"
+            // !! ថ្មី !!: បន្ថែម cardColor
+            className={`w-full max-w-md mx-auto rounded-2xl shadow-lg p-4 mb-3 flex items-center space-x-4 transition-all hover:bg-white/20 ${cardColor}`}
           >
             <img
               src={photoUrl}
@@ -566,10 +615,17 @@
               <p className="text-sm text-blue-200">
                 ចេញ: {formatTime(record?.checkOutTime)} | ចូល: {formatTime(record?.checkInTime)}
               </p>
+              {/* !! ថ្មី !!: បង្ហាញនាទីដែលលើស */}
+              {isOvertime && (
+                <p className="text-sm font-semibold text-red-300">
+                  (លើស {overtimeMins} នាទី)
+                </p>
+              )}
             </div>
             
             <div className="text-center px-2">
-              <p className="text-2xl font-bold text-green-300">{duration}</p>
+              {/* !! ថ្មី !!: បន្ថែម durationColor */}
+              <p className={`text-2xl font-bold ${durationColor}`}>{duration}</p>
               <p className="text-xs text-blue-200">នាទី</p>
             </div>
           </button>
@@ -631,6 +687,41 @@
         );
       };
       
+      // !! ថ្មី !!: Component សម្រាប់ Page "កាតចេញចូល"
+      const PassesInfoPage = ({ studentsOnBreakCount, totalPasses }) => {
+          const passesInUse = studentsOnBreakCount;
+          const passesAvailable = totalPasses - passesInUse;
+          
+          return (
+            <div className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-lg rounded-3xl shadow-xl p-8 mt-16 text-center">
+              <div className="mb-6">
+                <IconTicket className="w-24 h-24 text-blue-200 mx-auto" />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-4">
+                ស្ថានភាពកាតចេញចូល
+              </h2>
+              
+              <div className="mb-8">
+                <p className="text-8xl font-bold text-white">{passesAvailable}</p>
+                <p className="text-2xl text-blue-200">
+                  កាតនៅសល់
+                </p>
+              </div>
+              
+              <div className="flex justify-around text-white">
+                <div className="text-center">
+                  <p className="text-4xl font-bold text-red-300">{passesInUse}</p>
+                  <p className="text-lg text-blue-200">កំពុងប្រើ</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-4xl font-bold">{totalPasses}</p>
+                  <p className="text-lg text-blue-200">សរុប</p>
+                </div>
+              </div>
+            </div>
+          );
+      };
+      
 
       const LoadingSpinner = () => (
         <div className="flex justify-center items-center mt-10">
@@ -649,7 +740,7 @@
         .map(student => {
           const record = attendance[student.id];
           const elapsedMins = calculateDuration(record.checkOutTime, now.toISOString()); 
-          const isOvertime = elapsedMins > 15; 
+          const isOvertime = elapsedMins > OVERTIME_LIMIT_MINUTES; 
           return { student, elapsedMins, isOvertime };
         })
         .sort((a, b) => {
@@ -687,12 +778,13 @@
               </p>
 
               {/* --- 2. TABS (!! កែសម្រួល !!) --- */}
+              {/* !! ថ្មី !!: ប្តូរទៅ w-1/4 សម្រាប់ 4 Tabs */}
               <div className="w-full max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-full p-1 flex space-x-1 mb-6">
                 
                 {/* Tab 1: ស្វែងរក */}
                 <button
                   onClick={() => setCurrentPage('search')}
-                  className={`w-1/3 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
+                  className={`w-1/4 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
                     currentPage === 'search' 
                       ? 'bg-white text-blue-800 shadow-lg' 
                       : 'text-white'
@@ -706,7 +798,7 @@
                 {/* Tab 2: កំពុងសម្រាក */}
                 <button
                   onClick={() => setCurrentPage('onBreak')}
-                  className={`w-1/3 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
+                  className={`w-1/4 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
                     currentPage === 'onBreak' 
                       ? 'bg-white text-blue-800 shadow-lg' 
                       : 'text-white'
@@ -725,7 +817,7 @@
                 {/* Tab 3: បានចូល */}
                 <button
                   onClick={() => setCurrentPage('completed')}
-                  className={`w-1/3 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
+                  className={`w-1/4 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
                     currentPage === 'completed' 
                       ? 'bg-white text-blue-800 shadow-lg' 
                       : 'text-white'
@@ -736,6 +828,26 @@
                     {studentsCompletedBreak.length > 0 && (
                       <span className="absolute -top-1 -right-1 w-5 h-5 bg-green-600 text-white text-xs font-bold rounded-full flex items-center justify-center">
                         {studentsCompletedBreak.length}
+                      </span>
+                    )}
+                  </span>
+                </button>
+                
+                {/* !! ថ្មី !!: Tab 4: កាតចេញចូល */}
+                <button
+                  onClick={() => setCurrentPage('passes')}
+                  className={`w-1/4 px-2 py-3 rounded-full flex items-center justify-center transition-colors relative ${
+                    currentPage === 'passes' 
+                      ? 'bg-white text-blue-800 shadow-lg' 
+                      : 'text-white'
+                  }`}
+                >
+                  <span className="relative z-10 flex items-center">
+                    <IconTicket />
+                    {/* បង្ហាញចំនួនកាតកំពុងប្រើ */}
+                    {studentsOnBreak.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                        {studentsOnBreak.length}
                       </span>
                     )}
                   </span>
@@ -868,6 +980,19 @@
                 </div>
               )}
               
+              {/* --- !! ថ្មី !!: PAGE 4: កាតចេញចូល --- */}
+              {!loading && currentPage === 'passes' && (
+                <div 
+                  key="passes-page"
+                  className="pb-10"
+                >
+                  <PassesInfoPage 
+                    studentsOnBreakCount={studentsOnBreak.length} 
+                    totalPasses={TOTAL_PASSES}
+                  />
+                </div>
+              )}
+              
               {/* --- FOOTER (រួម) --- */}
               {!loading && userId && (
                  <p className="text-center text-xs text-blue-300 opacity-70 mt-8">
@@ -893,7 +1018,7 @@
                       calculateDuration(attendance[modalStudent.id]?.checkOutTime, now.toISOString())
                     }
                     isOvertime={
-                      calculateDuration(attendance[modalStudent.id]?.checkOutTime, now.toISOString()) > 15
+                      calculateDuration(attendance[modalStudent.id]?.checkOutTime, now.toISOString()) > OVERTIME_LIMIT_MINUTES
                     }
                   />
                   
@@ -920,3 +1045,4 @@
   </script>
 </body>
 </html>
+
